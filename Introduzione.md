@@ -168,6 +168,10 @@ Supponiamo che, mentre è in corso un prelievo, arrivi un bonifico che deve aggi
 ![Immagine descrittiva delle problematiche che possono insorgere nella programmazione parallela](immagini/prelievo_bonifico.jpeg)
 
 *Visualizzazione della race condition: le operazioni concorrenti sul saldo portano alla perdita di dati.*
+### Concorrenza Seriale e Parallela
+Il problema della concorrenza è presente sia nelle architetture seriali, sia in quelle parallele, infatti è un problema legato alla condivisione dello stesso spazio di memoria. Nelle architetture seriali viene eseguita una sola task alla volta, per farlo viene fatta una partizione temporale, detta time slicing, che riserva la componente di calcolo il tempo necessario per eseguire una delle task. Il problema della concorrenza avviene anche in questo caso, infatti quando più task condividono lo stesso dato, è possibile avere risultati non consistenti. Nel caso di architetture parallele invece le task vengono eseguite, a patto di avere abbastanza core, simultaneamente e in questo caso il problema della concorrenza viene esacerbato portando, se non adeguatamente controllato, a risultati non consistenti e imprevedibili. 
+
+![Immagine descrittiva della concorrenza parallela e non](immagini/concorrenza.png)
 
 ### Soluzioni alla Concorrenza
 
