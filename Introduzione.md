@@ -34,6 +34,88 @@ La strategia adottata dall'industria è stata:
 
 ---
 
+## La Pipeline: Parallelismo a Livello di Istruzione
+
+### Il Concetto di Pipeline
+
+Una delle forme più efficaci di parallelismo implementate nelle CPU moderne è la **pipeline** (o catena di montaggio). Questo meccanismo permette di eseguire più istruzioni contemporaneamente, suddividendo l'esecuzione di ogni istruzione in fasi distinte che possono sovrapporsi.
+
+### Come Funziona una Pipeline
+
+L'esecuzione di un'istruzione viene tipicamente suddivisa in 5 fasi principali:
+
+1. **IF (Instruction Fetch)**: Prelievo dell'istruzione dalla memoria
+2. **ID (Instruction Decode)**: Decodifica dell'istruzione e lettura dei registri
+3. **EX (Execute)**: Esecuzione dell'operazione (ALU)
+4. **MEM (Memory Access)**: Accesso alla memoria (se necessario)
+5. **WB (Write Back)**: Scrittura del risultato nel registro di destinazione
+
+Senza pipeline, ogni istruzione deve completare tutte le 5 fasi prima che la successiva possa iniziare. Con la pipeline, mentre un'istruzione è in fase di esecuzione (EX), la successiva può essere in fase di decodifica (ID), e quella dopo ancora in fase di prelievo (IF).
+
+#### Esempio Visivo
+
+**Esecuzione Seriale (senza pipeline)**:
+```
+Tempo:  1  2  3  4  5  6  7  8  9  10 11 12 13 14 15
+Istr1: IF ID EX MEM WB
+Istr2:                IF ID EX MEM WB
+Istr3:                               IF ID EX MEM WB
+```
+Tempo totale: 15 cicli per 3 istruzioni
+
+## Il Problema dei Salti Condizionali
+
+#### Il Problema Fondamentale
+
+I **salti condizionali** (branch) rappresentano il tallone d'Achille delle pipeline moderne. Il problema è semplice ma devastante per le prestazioni:
+
+**Quando incontri un salto condizionale, non sai in anticipo quale set di istruzioni seguirà.**
+
+Consideriamo questo pseudocodice:
+```c
+if (x > 10) {
+    // blocco A - set di istruzioni 1
+} else {
+    // blocco B - set di istruzioni 2
+}
+```
+
+#### Perché Questo Crea un Problema
+
+La pipeline funziona caricando in anticipo le istruzioni successive. Ma con un `if`:
+
+1. **Ciclo 1-2**: L'istruzione `if (x > 10)` viene prelevata e decodificata
+2. **Ciclo 3**: La condizione viene finalmente valutata → **Solo ora** si scopre se x > 10!
+3. **Il problema**: la pipeline ha già iniziato a caricare istruzioni successive, ma quali? Quelle del blocco A o del blocco B?
+
+#### Due Opzioni, Entrambe Costose
+
+**Opzione 1 - Attendere**
+- Fermare la pipeline e aspettare di conoscere l'esito
+- **Risultato**: 3-5 cicli di clock sprecati in attesa
+- Come fermare una catena di montaggio e lasciare gli operai inattivi
+
+**Opzione 2 - Indovinare (usata dalle CPU moderne)**
+- La CPU fa una **previsione** (es. "probabilmente x > 10 sarà vero")
+- Inizia a caricare le istruzioni del blocco A
+- **Se indovina giusto**: tutto procede senza rallentamenti ✓
+- **Se indovina male**: deve scartare tutto il lavoro fatto e ricaricare il blocco B ✗
+
+#### Il Costo di un Errore
+
+Quando la previsione è sbagliata:
+
+1. Tutte le istruzioni già caricate nella pipeline vengono **scartate**
+2. La pipeline viene **svuotata** completamente  
+3. Il set di istruzioni **corretto** deve essere ricaricato da zero
+4. La pipeline deve **ripartire**
+
+**Tempo perso**: 10-20 cicli di clock nelle CPU moderne!
+
+Questo processo di svuotamento e ricaricamento si chiama **pipeline flush** ed è il motivo per cui i salti condizionali rallentano drasticamente l'esecuzione del codice.
+
+---
+
 ## Obiettivi e Sfide del Calcolo Parallelo
 
 ### Obiettivi Principali
