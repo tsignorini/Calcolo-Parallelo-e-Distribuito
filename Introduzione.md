@@ -183,6 +183,11 @@ Per evitare questi problemi, la programmazione parallela richiede:
 
 ---
 
+## Parallel Computing (HPC) e Cloud Computing (HTC)
+La differenza tra High Performance Computing (HPC) e High Throughput Computing (HTC) è sostanzialmente la diversa gestione del Network. Infatti in entrambi i casi sono presenti una moltetudine di macchine, preposte però a fare compiti diversi. Nel caso dell'HPC, è utilizzato nella risoluzione di problemi estremamente complessi che una singola non riesce a computare per questioni di memoria, quindi è necessario ripartire il problema su più macchine, che però devono essere fortemente interconnesse e quindi si deve investire molto per quanto rigurda la gestione del network, a discapito delle prestazioni. Nel caso del cloud computing invece il problema che si affronta è diverso, infatti si hanno problemi più piccoli e il compito sta nell'assegnare il giusto compito alla macchina più adatta a risolvere il particolare problema, questo si configura in un minor costo della gestione network.
+
+---
+
 ## Conclusioni
 
 Il calcolo parallelo rappresenta sia una **necessità tecnologica** (per gestire consumi energetici e limiti fisici) sia una **sfida ingegneristica** complessa. 
