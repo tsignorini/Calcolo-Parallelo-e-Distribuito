@@ -59,3 +59,82 @@ Le comunicazioni in MPI si dividono in punto-punto e collettive:
 
 * **Punto-punto:** Coinvolgono coppie di processi. Su supercalcolatori con un alto numero di nodi, utilizzarle per comunicazioni globali comporta lo svantaggio di dover eseguire moltissime chiamate di funzione, generando un grande overhead e problemi di scalabilità.
 * **Collettive:** Operano a un livello di astrazione più alto su interi gruppi di processi. Sostituiscono i cicli di comunicazioni punto-punto, ottimizzando intrinsecamente lo scambio di dati e la sincronizzazione tramite l'hardware di rete.
+
+## Comunicazioni Punto-Punto
+Le comunicazioni punto-punto sono necessarie per lo scambio di dati tra singoli nodi. Tuttavia quando lo stesso dato deve essere distribuito a più processi — o più in generale quando tutti i processi partecipano a uno scambio coordinato — usare ripetutamente MPI_Send/MPI_Recv risulta poco efficiente: comporta molte chiamate a funzione (overhead elevato), aumenta il rischio di errori nella gestione dei rank, e non sfrutta gli algoritmi ottimizzati (es. broadcast ad albero) che le funzioni collettive implementano internamente.
+### MPI_Send
+
+#### Definizione
+
+```c
+int MPI_Send(const void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm)
+```
+
+#### Parametri
+
+| Parametro  | Tipo            | Descrizione                                        |
+|------------|-----------------|----------------------------------------------------|
+| `buf`      | `const void *`  | Puntatore al buffer contenente i dati da inviare   |
+| `count`    | `int`           | Numero di elementi da inviare                      |
+| `datatype` | `MPI_Datatype`  | Tipo MPI degli elementi (es. `MPI_INT`, `MPI_DOUBLE`) |
+| `dest`     | `int`           | `rank_id` del processo ricevente                   |
+| `tag`      | `int`           | Etichetta del messaggio (intero non negativo)      |
+| `comm`     | `MPI_Comm`      | Comunicatore MPI (es. `MPI_COMM_WORLD`)            |
+
+
+#### Comportamento bloccante
+
+`MPI_Send` è una funzione **bloccante**: ritorna solo quando il buffer `buf` è **sicuro da riutilizzare**, ovvero quando MPI ha copiato i dati nel proprio sistema interno (buffer di sistema o canale di trasmissione).
+
+> ⚠️ **Attenzione:** il ritorno della funzione **non garantisce** che il messaggio sia stato consegnato al processo ricevente. La consegna può avvenire in modo asincrono, dopo il ritorno.
+
+#### MPI_PROC_NULL
+Se `dest` è impostato a `MPI_PROC_NULL`, la chiamata **non ha alcun effetto**: viene trattata come un'operazione nulla e ritorna immediatamente.
+
+### MPI_Recv
+
+#### Definizione
+
+```c
+int MPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag, MPI_Comm comm, MPI_Status *status)
+```
+
+#### Parametri
+
+| Parametro  | Tipo            | Descrizione                                              |
+|------------|-----------------|----------------------------------------------------------|
+| `buf`      | `void *`        | Puntatore al buffer in cui verrà scritto il dato ricevuto |
+| `count`    | `int`           | Numero **massimo** di elementi che il buffer può contenere |
+| `datatype` | `MPI_Datatype`  | Tipo MPI degli elementi (es. `MPI_INT`, `MPI_DOUBLE`)    |
+| `source`   | `int`           | `rank_id` del mittente (o `MPI_ANY_SOURCE`)              |
+| `tag`      | `int`           | Etichetta del messaggio (o `MPI_ANY_TAG`)                |
+| `comm`     | `MPI_Comm`      | Comunicatore MPI (es. `MPI_COMM_WORLD`)                  |
+| `status`   | `MPI_Status *`  | Struttura con informazioni sul messaggio ricevuto        |
+
+
+#### Comportamento bloccante
+
+`MPI_Recv` è una funzione **bloccante**: ritorna solo quando il dato è stato effettivamente scritto nel buffer `buf` ed è pronto per essere usato. Per eseguire il resto del codice la funzione aspetta che il dato venga ricevuto. Questo comportamento risulta utile perché, tipicamente, il dato atteso è necessario per proseguire con la computazione.
+
+> A differenza di `MPI_Send`, `MPI_Recv` **garantisce** che il dato sia disponibile nel buffer al momento del ritorno.
+
+#### MPI_Status
+
+La struttura `status` contiene informazioni sul messaggio ricevuto:
+
+| Campo              | Descrizione                          |
+|--------------------|--------------------------------------|
+| `MPI_SOURCE`       | Rank del mittente effettivo          |
+| `MPI_TAG`          | Tag del messaggio ricevuto           |
+| `MPI_ERROR`        | Codice di errore                     |
+
+Utile soprattutto quando si usano wildcards (`MPI_ANY_SOURCE`, `MPI_ANY_TAG`), per sapere chi ha effettivamente inviato il messaggio e con quale tag.  
+Se le informazioni non servono, si può passare `MPI_STATUS_IGNORE`.
+
+#### Wildcards
+
+| Costante          | Usata per | Effetto                                        |
+|-------------------|-----------|------------------------------------------------|
+| `MPI_ANY_SOURCE`  | `source`  | Accetta messaggi da qualsiasi mittente         |
+| `MPI_ANY_TAG`     | `tag`     | Accetta messaggi con qualsiasi etichetta       |
+
