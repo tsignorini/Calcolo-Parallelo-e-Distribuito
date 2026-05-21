@@ -194,6 +194,119 @@ MPI_Send → P1   ──────────► MPI_Recv ← P0    ✓
 MPI_Recv ← P1   ◄────────── MPI_Send → P0    ✓
 ```
  
-In questo modo il processo 1 è già in ascolto quando il processo 0 invia, e lo scambio avviene senza blocchi.
+In questo modo il processo 1 è già in ascolto quando il processo 0 invia, e lo scambio avviene senza blocchi. 
+
+### MPI_Sendrecv — Scambio simultaneo e sicuro
+
+Un'alternativa più robusta per evitare i deadlock quando due processi devono scambiarsi dati contemporaneamente (come nel caso dello scambio di *ghost cells*) è l'utilizzo di `MPI_Sendrecv`. Questa funzione esegue un'operazione di invio e una di ricezione in un'unica chiamata, demandando a MPI la gestione interna delle precedenze e dei buffer per scongiurare qualsiasi blocco.
+
+#### Definizione
+
+```c
+int MPI_Sendrecv(const void *sendbuf, int sendcount, MPI_Datatype sendtype,
+                 int dest, int sendtag,
+                 void *recvbuf, int recvcount, MPI_Datatype recvtype,
+                 int source, int recvtag,
+                 MPI_Comm comm, MPI_Status *status)
+```
+
+I parametri sono semplicemente la concatenazione di quelli di una `MPI_Send` e di una `MPI_Recv`.
+
+#### Parametri
+
+| Parametro | Tipo | Descrizione |
+|---|---|---|
+| `sendbuf` | `const void *` | Puntatore al buffer dei dati da inviare |
+| `sendcount` | `int` | Numero di elementi da inviare |
+| `sendtype` | `MPI_Datatype` | Tipo MPI degli elementi da inviare |
+| `dest` | `int` | Rank del processo ricevente |
+| `sendtag` | `int` | Etichetta del messaggio in uscita |
+| `recvbuf` | `void *` | Puntatore al buffer in cui salvare i dati in ingresso |
+| `recvcount` | `int` | Numero massimo di elementi da ricevere |
+| `recvtype` | `MPI_Datatype` | Tipo MPI degli elementi da ricevere |
+| `source` | `int` | Rank del processo mittente |
+| `recvtag` | `int` | Etichetta del messaggio in ingresso |
+| `comm` | `MPI_Comm` | Comunicatore MPI |
+| `status` | `MPI_Status *` | Status della ricezione (o `MPI_STATUS_IGNORE`) |
+
+#### Perché utilizzarla?
+
+* **Zero Deadlock:** I processi possono richiamarla simultaneamente senza preoccuparsi dell'ordine di esecuzione, perché MPI gestisce la comunicazione bidirezionale in modo sicuro.
+* **Codice più pulito:** Sostituisce i blocchi condizionali (es. `if (rank % 2 == 0) { invia; ricevi; } else { ricevi; invia; }`) rendendo il codice molto più leggibile, compatto e meno prono a errori umani.
+
+> ⚠️ **Attenzione ai buffer:** I buffer `sendbuf` e `recvbuf` devono essere **disgiunti** in memoria. Non è possibile inviare e ricevere dati sovrascrivendo la stessa area di memoria (se serve questo comportamento, esiste una variante apposita chiamata `MPI_Sendrecv_replace`).
+
+### MPI_Isend e MPI_Irecv — Comunicazioni non bloccanti
+
+`MPI_Isend` e `MPI_Irecv` sono le versioni **non bloccanti** di `MPI_Send` e `MPI_Recv`: avviano l'operazione di comunicazione e ritornano **immediatamente**, senza aspettarne il completamento.
+
+#### Definizioni
+
+```c
+int MPI_Isend(const void *buf, int count, MPI_Datatype datatype,
+              int dest, int tag, MPI_Comm comm, MPI_Request *request)
+
+int MPI_Irecv(void *buf, int count, MPI_Datatype datatype,
+              int source, int tag, MPI_Comm comm, MPI_Request *request)
+```
+
+Il parametro aggiuntivo rispetto alle versioni bloccanti è `MPI_Request *request`: un handle che identifica l'operazione in corso e viene usato in seguito per verificarne il completamento.
+
+#### Completamento: MPI_Wait e MPI_Test
+
+Poiché le funzioni ritornano prima che la comunicazione sia conclusa, è necessario sincronizzarsi esplicitamente prima di accedere al buffer:
+
+```c
+// Blocca finché l'operazione non è completata
+MPI_Wait(MPI_Request *request, MPI_Status *status)
+
+// Non bloccante: controlla se l'operazione è completata (flag = 1) o no (flag = 0)
+MPI_Test(MPI_Request *request, int *flag, MPI_Status *status)
+```
+
+> ⚠️ **Regola fondamentale:** il buffer `buf` **non deve essere letto né modificato** tra la chiamata a `MPI_Isend`/`MPI_Irecv` e il completamento confermato da `MPI_Wait` o `MPI_Test`. Farlo è undefined behavior.
+
+#### Pattern d'uso tipico
+
+```c
+MPI_Request req;
+
+MPI_Isend(buf, count, MPI_INT, dest, tag, MPI_COMM_WORLD, &req);
+
+// computazione indipendente dalla comunicazione...
+do_work();
+
+MPI_Wait(&req, MPI_STATUS_IGNORE); // attende il completamento
+```
+
+In questo modo la comunicazione avviene **in parallelo** con `do_work()`, nascondendo la latenza di rete.
+
+#### Confronto bloccante vs non bloccante
+
+```
+MPI_Send (bloccante)
+────────────────────────────────────────────────────
+[  Send (attesa)  ][  computazione  ]
+
+MPI_Isend (non bloccante)
+────────────────────────────────────────────────────
+[Isend][ computazione  ][Wait]
+          ↑
+    comunicazione in corso in background
+```
+
+| Aspetto               | MPI_Send / MPI_Recv       | MPI_Isend / MPI_Irecv              |
+|-----------------------|---------------------------|------------------------------------|
+| Ritorno               | Solo a completamento      | Immediato                          |
+| Buffer dopo chiamata  | Subito riutilizzabile     | Non toccare prima di MPI_Wait      |
+| Rischio deadlock      | Alto (ordine critico)     | Basso (non si bloccano a vicenda)  |
+| Overlap comm/compute  | ✗                         | ✓                                  |
+| Complessità del codice| Bassa                     | Più alta                           |
+
+#### Perché MPI_Isend è molto utile
+
+Nelle applicazioni HPC il tempo speso in comunicazione è spesso il collo di bottiglia. `MPI_Isend` permette di **sovrapporre comunicazione e computazione**: mentre i dati viaggiano sulla rete, il processo può già lavorare sulla parte di computazione che non dipende da quei dati. Questo pattern, detto *latency hiding*, può portare a speedup significativi rispetto all'alternativa bloccante, soprattutto in applicazioni con molti scambi tra processi.
+
+Inoltre, poiché `MPI_Isend` e `MPI_Irecv` non si bloccano, due processi possono chiamarle entrambi nello stesso ordine **senza rischio di deadlock**, semplificando la gestione della sincronizzazione rispetto alle versioni bloccanti.
 
 
