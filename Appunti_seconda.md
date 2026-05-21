@@ -116,7 +116,8 @@ int MPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag, M
 
 `MPI_Recv` è una funzione **bloccante**: ritorna solo quando il dato è stato effettivamente scritto nel buffer `buf` ed è pronto per essere usato. Per eseguire il resto del codice la funzione aspetta che il dato venga ricevuto. Questo comportamento risulta utile perché, tipicamente, il dato atteso è necessario per proseguire con la computazione.
 
-> A differenza di `MPI_Send`, `MPI_Recv` **garantisce** che il dato sia disponibile nel buffer al momento del ritorno.
+> `MPI_Recv` **garantisce** che il dato sia disponibile nel buffer al momento del ritorno.
+
 
 #### MPI_Status
 
@@ -130,6 +131,26 @@ La struttura `status` contiene informazioni sul messaggio ricevuto:
 
 Utile soprattutto quando si usano wildcards (`MPI_ANY_SOURCE`, `MPI_ANY_TAG`), per sapere chi ha effettivamente inviato il messaggio e con quale tag.  
 Se le informazioni non servono, si può passare `MPI_STATUS_IGNORE`.
+
+#### Count e dimensione del messaggio
+
+`count` specifica la **capienza massima** del buffer, non il numero esatto di elementi attesi.
+
+- Se il messaggio ricevuto contiene **meno elementi** di `count`: nessun errore, il buffer viene riempito parzialmente.
+- Se il messaggio ricevuto contiene **più elementi** di `count`: errore di overflow (`MPI_ERR_TRUNCATE`).
+
+Per sapere quanti elementi sono stati **effettivamente ricevuti** si usa `MPI_Get_count()`:
+
+```c
+int MPI_Get_count(const MPI_Status *status, MPI_Datatype datatype, int *count)
+```
+
+Legge dalla struttura `status` il numero di elementi ricevuti e lo scrive in `count`. Va chiamata **dopo** `MPI_Recv`, passando lo stesso `datatype` usato nella ricezione.
+
+```c
+int received;
+MPI_Get_count(&status, MPI_INT, &received);
+```
 
 #### Wildcards
 
