@@ -159,3 +159,41 @@ MPI_Get_count(&status, MPI_INT, &received);
 | `MPI_ANY_SOURCE`  | `source`  | Accetta messaggi da qualsiasi mittente         |
 | `MPI_ANY_TAG`     | `tag`     | Accetta messaggi con qualsiasi etichetta       |
 
+### Deadlocks
+ 
+Nell'utilizzo di `MPI_Send` e `MPI_Recv` bisogna prestare particolare attenzione a possibili deadlock. Poiché entrambe le funzioni sono **bloccanti**, se due processi si aspettano a vicenda senza che nessuno dei due proceda, il programma si blocca indefinitamente.
+ 
+#### Scenario classico
+ 
+Il caso più comune si verifica quando due processi vogliono scambiarsi dati e chiamano entrambi `MPI_Send` prima di chiamare `MPI_Recv`:
+ 
+```
+Processo 0                  Processo 1
+──────────────────          ──────────────────
+MPI_Send → P1   ────┐  ┌─── MPI_Send → P0
+                    │  │
+                (entrambi bloccati: aspettano
+                 che l'altro chiami Recv)
+                    │  │
+MPI_Recv ← P1   ────┘  └─── MPI_Recv ← P0
+         (mai raggiunta)      (mai raggiunta)
+```
+ 
+`MPI_Send` è bloccante: il processo 0 resta fermo finché il messaggio non viene preso in carico dal sistema MPI. Se anche il processo 1 sta facendo lo stesso contemporaneamente, nessuno dei due chiama mai `MPI_Recv` e il programma si blocca.
+ 
+> ⚠️ Il comportamento dipende dall'implementazione MPI: per messaggi **piccoli** alcuni sistemi bufferizzano internamente il messaggio e la Send ritorna subito, mascherando il deadlock. Per messaggi **grandi** il buffer si esaurisce e il deadlock si manifesta. Non fare affidamento su questo comportamento.
+ 
+#### Soluzione: invertire l'ordine su un processo
+ 
+Basta che uno dei due chiami `MPI_Recv` prima di `MPI_Send`:
+ 
+```
+Processo 0                  Processo 1
+──────────────────          ──────────────────
+MPI_Send → P1   ──────────► MPI_Recv ← P0    ✓
+MPI_Recv ← P1   ◄────────── MPI_Send → P0    ✓
+```
+ 
+In questo modo il processo 1 è già in ascolto quando il processo 0 invia, e lo scambio avviene senza blocchi.
+
+
