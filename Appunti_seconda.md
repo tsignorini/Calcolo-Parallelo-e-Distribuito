@@ -317,12 +317,49 @@ L'uso di una normale funzione di sistema come `exit()` terminerebbe unicamente i
 
 ## Le Comunicazioni Collettive in MPI
 
-Nel calcolo parallelo con **MPI (Message Passing Interface)**, le comunicazioni collettive (come `MPI_Bcast`, `MPI_Reduce` o `MPI_Gather`) coordinano lo scambio di dati tra tutti i processi di un comunicatore in un'unica operazione, offrendo vantaggi prestazionali netti rispetto alle comunicazioni punto-punto (`MPI_Send`/`MPI_Recv`).
+Nel calcolo parallelo con **MPI (Message Passing Interface)**, le comunicazioni collettive (come `MPI_Bcast`, `MPI_Reduce` o `MPI_Gather`) coordinano lo scambio di dati tra tutti i processi di un comunicatore in un'unica operazione, offrendo vantaggi prestazionali netti rispetto alle comunicazioni punto-punto (`MPI_Send`/`MPI_Recv`). Saperle usare correttamente è quindi un requisito chiave per un programmatore nell'ambito del calcolo distribuito.
 
 ### Perché le Collettive sono più efficienti delle Punto-Punto:
 
 1. **Complessità Algoritmica $O(\log N)$**: Se un processo master invia un dato a $N$ nodi tramite punto-punto, impiega un tempo lineare $O(N)$. Le funzioni collettive utilizzano invece algoritmi ad albero (es. alberi binomiali) in cui i nodi intermedi ridistribuiscono il messaggio, abbattendo la complexity a livello logaritmico $O(\log N)$.
 2. **Ottimizzazione Topologica (Hardware Awareness)**: Le librerie MPI riconoscono l'architettura sottostante. Sfruttano la memoria condivisa per i processi sullo stesso nodo e il multicast hardware (es. InfiniBand) per il traffico di rete, ottimizzando il percorso dei dati in modo trasparente all'utente.
 3. **Riduzione dell'Overhead e dei Deadlock**: Gestire manualmente decine di comunicazioni punto-punto aumenta il rischio di colli di bottiglia sul master e di blocchi reciproci (*deadlock*). Le collettive offrono una sincronizzazione implicita e ottimizzata, riducendo l'overhead di controllo e semplificando la struttura del codice.
+
+### MPI_Barrier
+La funzione `MPI_Barrier(comm)` è un'operazione di sincronizzazione collettiva che agisce su un gruppo di processi associati a uno specifico comunicatore, come ad esempio `MPI_COMM_WORLD`. Quando un processo raggiunge ed esegue questa istruzione, si blocca e attende finché tutti gli altri processi appartenenti al gruppo non hanno raggiunto a loro volta la medesima chiamata. Solo quando tutti i processi sono arrivati alla barriera, questi vengono sbloccati e sono liberi di proseguire la loro esecuzione.
+
+#### Vantaggi
+* **Gestione sicura delle fasi:** Rappresenta un modo estremamente semplice e diretto per separare due fasi distinte di una computazione parallela, garantendo che i messaggi generati in una fase non interferiscano con quelli della fase successiva.
+
+#### Svantaggi
+* **Overhead prestazionale:** Trattandosi di un'operazione globale che richiede la partecipazione e l'attesa di tutti i processi del comunicatore, può risultare molto dispendiosa in termini di tempo e rallentare significativamente l'esecuzione del programma.
+* **Spesso evitabile:** In molti casi, l'invocazione di `MPI_Barrier()` dovrebbe essere evitata, poiché la sincronizzazione tra i processi può essere ottenuta in modo più efficiente strutturando correttamente l'indirizzamento esplicito delle comunicazioni (ad esempio sfruttando i `tag`, l'identificativo del mittente `source` o l'isolamento garantito da comunicatori separati).
+
+### MPI_Bcast()
+La funzione `MPI_Bcast()` (Broadcast) permette a un singolo processo, definito "root", di inviare una copia esatta degli stessi dati a tutti gli altri processi appartenenti a un determinato gruppo o comunicatore. Essendo un'operazione collettiva, la funzione deve essere obbligatoriamente invocata da tutti i processi del gruppo.
+
+#### Argomenti della funzione
+La sintassi di base è `MPI_Bcast(buffer, count, datatype, root, comm)`:
+* **`buffer`**: puntatore all'area di memoria dei dati. Per il processo `root` rappresenta l'indirizzo da cui leggere i dati da inviare; per tutti gli altri processi rappresenta l'indirizzo in cui scrivere i dati ricevuti.
+* **`count`**: numero di elementi che compongono il messaggio.
+* **`datatype`**: tipo di dato degli elementi trasmessi (es. `MPI_INT`).
+* **`root`**: l'identificativo (rank) del processo mittente che possiede i dati iniziali.
+* **`comm`**: il comunicatore di riferimento (es. `MPI_COMM_WORLD`).
+
+#### Schema di funzionamento
+Ecco un esempio di come si propaga il buffer se il processo sorgente (`root`) è il *Proc 1* e deve inviare 3 elementi (identificati come 1, 2, 3) a un totale di 4 processi.
+
+**Prima della chiamata a `MPI_Bcast()`**  
+Proc 0: `[   |   |   ]`  
+Proc 1: `[ 1 | 2 | 3 ]`  <-- ROOT  
+Proc 2: `[   |   |   ]`  
+Proc 3: `[   |   |   ]`  
+
+**Dopo la chiamata a `MPI_Bcast()`**  
+Proc 0: `[ 1 | 2 | 3 ]`    
+Proc 1: `[ 1 | 2 | 3 ]`  
+Proc 2: `[ 1 | 2 | 3 ]`  
+Proc 3: `[ 1 | 2 | 3 ]`  
+
 
 
