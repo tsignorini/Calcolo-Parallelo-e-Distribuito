@@ -444,29 +444,6 @@ Il processo si divide in tre fasi principali:
 3. **Raccolta (Gather):** Il processo `root` invoca `MPI_Gather` per raccogliere tutti i `local_z` dai vari processi e concatenarli nel vettore finale $z$.
 
 #### Schema di funzionamento
-Supponiamo di avere vettori di 8 elementi totali e 4 processi. Ogni processo gestirà un blocco ("chunk") di 2 elementi.
-
-**Fase 1: Dati iniziali sul ROOT e Distribuzione**  
-Proc 0 (ROOT) possiede i vettori completi:    
-`x[] = [ x0, x1 | x2, x3 | x4, x5 | x6, x7 ]`  
-`y[] = [ y0, y1 | y2, y3 | y4, y5 | y6, y7 ]`  
-  
-        |  (Doppia chiamata a MPI_Scatter)  
-        V  
-
-**Fase 2: Calcolo Parallelo sui Singoli Nodi**  
-[ Proc 0 ]             [ Proc 1 ]             [ Proc 2 ]             [ Proc 3 ]  
-local_x = [x0, x1]     local_x = [x2, x3]     local_x = [x4, x5]     local_x = [x6, x7]  
-local_y = [y0, y1]     local_y = [y2, y3]     local_y = [y4, y5]     local_y = [y6, y7]  
-    |                      |                      |                      |  
-    V (somma locale)       V (somma locale)       V (somma locale)       V (somma locale)  
-local_z = [z0, z1]     local_z = [z2, z3]     local_z = [z4, z5]     local_z = [z6, z7]  
-
-        |  (Chiamata a MPI_Gather)  
-        V  
-
-**Fase 3: Ricomposizione sul ROOT**  
-Proc 0 (ROOT) raccoglie i frammenti nel vettore finale:  
-`z[] = [ z0, z1 | z2, z3 | z4, z5 | z6, z7 ]`  
+![Immagine descrittiva della somma di un vettore in parallelo.](immagini/vector_sum.jpeg)
 
 
