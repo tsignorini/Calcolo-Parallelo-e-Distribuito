@@ -383,16 +383,90 @@ La sintassi standard è `MPI_Scatter(sendbuf, sendcnt, sendtype, recvbuf, recvcn
 #### Schema di funzionamento
 Ecco uno schema di come viene "sparpagliato" l'array. Supponiamo che il **Proc 0** sia il `root` e possegga un array di 12 elementi da distribuire a un totale di 4 processi. In questo caso, `sendcnt` e `recvcnt` varranno 3, poiché ogni processo riceverà 3 elementi.
 
-**Prima della chiamata a `MPI_Scatter()`**
-Proc 0 (ROOT): `sendbuf = [ 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 ]`
-Proc 1:        `recvbuf = [   |   |   ]`
-Proc 2:        `recvbuf = [   |   |   ]`
-Proc 3:        `recvbuf = [   |   |   ]`
+**Prima della chiamata a `MPI_Scatter()`**  
+Proc 0 (ROOT): `sendbuf = [ 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 ]`  
+Proc 1:        `recvbuf = [   |   |   ]`  
+Proc 2:        `recvbuf = [   |   |   ]`  
+Proc 3:        `recvbuf = [   |   |   ]`  
 
-**Dopo la chiamata a `MPI_Scatter()`**
-Proc 0: `recvbuf = [ 1 |  2 |  3 ]`
-Proc 1: `recvbuf = [ 4 |  5 |  6 ]`
-Proc 2: `recvbuf = [ 7 |  8 |  9 ]`
-Proc 3: `recvbuf = [ 10| 11 | 12 ]`
+**Dopo la chiamata a `MPI_Scatter()`**  
+Proc 0: `recvbuf = [ 1 |  2 |  3 ]`  
+Proc 1: `recvbuf = [ 4 |  5 |  6 ]`  
+Proc 2: `recvbuf = [ 7 |  8 |  9 ]`  
+Proc 3: `recvbuf = [ 10| 11 | 12 ]`  
+
+
+### MPI_Gather()
+
+La funzione `MPI_Gather()` implementa una comunicazione collettiva di tipo "molti-a-uno" (all-to-one) ed è l'esatta operazione inversa di `MPI_Scatter()`. Essa raccoglie dati distinti provenienti dai buffer di invio di ciascun processo all'interno del gruppo (incluso il nodo destinatario) e li concatena in ordine di rank nel buffer di ricezione di un singolo processo specificato, definito "root".
+
+#### Argomenti della funzione
+La sintassi standard è `MPI_Gather(sendbuf, sendcnt, sendtype, recvbuf, recvcnt, recvtype, root, comm)`:
+* **`sendbuf`**: puntatore all'area di memoria contenente i dati che il singolo processo deve inviare.
+* **`sendcnt`**: numero di elementi inviati dal singolo processo.
+* **`sendtype`**: tipo di dato degli elementi nel buffer di invio.
+* **`recvbuf`**: puntatore all'area di memoria in cui il processo `root` salverà i dati raccolti. È rilevante solo per il processo `root`, che deve aver allocato preventivamente spazio sufficiente per contenere tutti i dati in arrivo.
+* **`recvcnt`**: numero di elementi che il root riceve *da ciascun singolo processo* (non il totale).
+* **`recvtype`**: tipo di dato degli elementi attesi nel buffer di ricezione.
+* **`root`**: l'identificativo (rank) del processo destinatario che raccoglierà tutti i messaggi.
+* **`comm`**: il comunicatore di riferimento (es. `MPI_COMM_WORLD`).
+
+> 💡 **Nota bene sui parametri:**
+> Anche per `MPI_Gather()` le quantità e i tipi di dato dichiarati per l'invio e per la ricezione possono differire tra loro, consentendo alle operazioni di rete di gestire la conversione tra processi o piattaforme eterogenee. 
+
+#### Schema di funzionamento
+Ecco uno schema di come i dati vengono raccolti. Supponiamo che il **Proc 1** sia il processo destinatario (`root`) e che tutti i 4 processi del comunicatore debbano inviare 3 elementi ciascuno. In questo caso, `sendcnt` e `recvcnt` varranno 3.
+
+**Prima della chiamata a `MPI_Gather()`**  
+Proc 0:        `sendbuf = [  1 |  2 |  3 ]`  
+Proc 1 (ROOT): `sendbuf = [  4 |  5 |  6 ]`  
+Proc 2:        `sendbuf = [  7 |  8 |  9 ]`  
+Proc 3:        `sendbuf = [ 10 | 11 | 12 ]`  
+
+**Dopo la chiamata a `MPI_Gather()`**  
+Proc 0: (Dati inviati)  
+Proc 1: `recvbuf = [ 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 ]`  
+Proc 2: (Dati inviati)  
+Proc 3: (Dati inviati)  
+
+Ecco un esempio pratico che unisce l'utilizzo di `MPI_Scatter` e `MPI_Gather` per risolvere un problema classico: la **somma di due vettori**. 
+
+L'idea alla base di questo schema è il pattern "distribuisci, calcola, raccogli" (scatter-compute-gather). Il processo "root" (solitamente il Proc 0) possiede i due array completi iniziali. Utilizza la Scatter per dividere i dati e inviarli ai vari nodi. Ogni nodo esegue la somma solo sulla sua piccola porzione di dati, generando un frammento del risultato. Infine, il root usa la Gather per ricomporre i frammenti nel vettore risultato finale.
+
+
+### Esempio Pratico: Somma di Vettori Parallela
+
+La combinazione delle funzioni `MPI_Scatter` e `MPI_Gather` è ideale per parallelizzare operazioni su array come la somma di due vettori, $x$ e $y$, per ottenere un vettore risultato $z$ (dove $z_i = x_i + y_i$). 
+
+Il processo si divide in tre fasi principali:
+1. **Distribuzione (Scatter):** Il processo `root` (Proc 0) invoca `MPI_Scatter` due volte: una per frammentare e distribuire il vettore $x$ e una per il vettore $y$. Ogni processo riceve così i propri array parziali (`local_x` e `local_y`).
+2. **Calcolo locale:** Ogni processo, in parallelo e in modo indipendente, esegue un normale ciclo `for` per sommare elemento per elemento i suoi `local_x` e `local_y`, salvando il risultato in un array `local_z`.
+3. **Raccolta (Gather):** Il processo `root` invoca `MPI_Gather` per raccogliere tutti i `local_z` dai vari processi e concatenarli nel vettore finale $z$.
+
+#### Schema di funzionamento
+Supponiamo di avere vettori di 8 elementi totali e 4 processi. Ogni processo gestirà un blocco ("chunk") di 2 elementi.
+
+**Fase 1: Dati iniziali sul ROOT e Distribuzione**  
+Proc 0 (ROOT) possiede i vettori completi:    
+`x[] = [ x0, x1 | x2, x3 | x4, x5 | x6, x7 ]`  
+`y[] = [ y0, y1 | y2, y3 | y4, y5 | y6, y7 ]`  
+  
+        |  (Doppia chiamata a MPI_Scatter)  
+        V  
+
+**Fase 2: Calcolo Parallelo sui Singoli Nodi**  
+[ Proc 0 ]             [ Proc 1 ]             [ Proc 2 ]             [ Proc 3 ]  
+local_x = [x0, x1]     local_x = [x2, x3]     local_x = [x4, x5]     local_x = [x6, x7]  
+local_y = [y0, y1]     local_y = [y2, y3]     local_y = [y4, y5]     local_y = [y6, y7]  
+    |                      |                      |                      |  
+    V (somma locale)       V (somma locale)       V (somma locale)       V (somma locale)  
+local_z = [z0, z1]     local_z = [z2, z3]     local_z = [z4, z5]     local_z = [z6, z7]  
+
+        |  (Chiamata a MPI_Gather)  
+        V  
+
+**Fase 3: Ricomposizione sul ROOT**  
+Proc 0 (ROOT) raccoglie i frammenti nel vettore finale:  
+`z[] = [ z0, z1 | z2, z3 | z4, z5 | z6, z7 ]`  
 
 
