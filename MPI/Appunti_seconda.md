@@ -444,6 +444,6 @@ Il processo si divide in tre fasi principali:
 3. **Raccolta (Gather):** Il processo `root` invoca `MPI_Gather` per raccogliere tutti i `local_z` dai vari processi e concatenarli nel vettore finale $z$.
 
 #### Schema di funzionamento
-![Immagine descrittiva della somma di un vettore in parallelo.](immagini/vector_sum.jpeg)
+![Immagine descrittiva della somma di un vettore in parallelo.](../immagini/vector_sum.jpeg)
 
 
