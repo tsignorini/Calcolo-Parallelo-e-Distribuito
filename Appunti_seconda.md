@@ -309,6 +309,12 @@ Nelle applicazioni HPC il tempo speso in comunicazione è spesso il collo di bot
 
 Inoltre, poiché `MPI_Isend` e `MPI_Irecv` non si bloccano, due processi possono chiamarle entrambi nello stesso ordine **senza rischio di deadlock**, semplificando la gestione della sincronizzazione rispetto alle versioni bloccanti.
 
+### MPI_Abort
+
+La funzione `MPI_Abort()` viene utilizzata nell'ambito della programmazione parallela con MPI (Message Passing Interface) per forzare la terminazione anomala di tutti i processi appartenenti a un determinato comunicatore (generalmente `MPI_COMM_WORLD`). 
+Il caso d'uso tipico si verifica quando **un errore critico e irrecuperabile intercorre su uno solo dei nodi** o processi della griglia computazionale. In un'applicazione parallela, i nodi sono strettamente interconnessi tramite operazioni di comunicazione bloccanti (come `MPI_Send`, `MPI_Recv` o barriere di sincronizzazione come `MPI_Barrier`). Se un singolo nodo dovesse fallire o interrompere la sua esecuzione silenziosamente senza notificare gli altri, l'intera applicazione entrerebbe in uno stato di **deadlock** (blocco indefinito), continuando a consumare risorse del cluster senza produrre alcun risultato. Invocando `MPI_Abort(MPI_COMM_WORLD, error_code)`, il nodo che ha riscontrato l'anomalia ordina all'ambiente di runtime di MPI di terminare immediatamente e in modo pulito tutti gli altri processi, restituendo un codice d'errore (`error_code`) utile per il debugging.
+L'uso di una normale funzione di sistema come `exit()` terminerebbe unicamente il processo locale in cui si è verificato l'errore. Essendo i nodi distribuiti su un'infrastruttura di rete, propagare in modo affidabile e automatico questo stato di uscita a tutti gli altri nodi risulterebbe estremamente difficile. Di conseguenza, il nodo guasto si spegnerebbe in isolamento, mentre il resto del cluster continuerebbe l'esecuzione rimanendo fatalmente bloccato in attesa di comunicazioni (deadlock).
+
 ## Le Comunicazioni Collettive in MPI
 
 Nel calcolo parallelo con **MPI (Message Passing Interface)**, le comunicazioni collettive (come `MPI_Bcast`, `MPI_Reduce` o `MPI_Gather`) coordinano lo scambio di dati tra tutti i processi di un comunicatore in un'unica operazione, offrendo vantaggi prestazionali netti rispetto alle comunicazioni punto-punto (`MPI_Send`/`MPI_Recv`).
