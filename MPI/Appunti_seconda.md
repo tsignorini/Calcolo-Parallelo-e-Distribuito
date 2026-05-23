@@ -476,6 +476,50 @@ Proc 1: `recvbuf = [ 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 ]`
 Proc 2: `recvbuf = [ 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 ]`  
 Proc 3: `recvbuf = [ 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 ]`  
 
+### Comunicazioni Collettive Irregolari: `MPI_Scatterv()` e `MPI_Gatherv()`
 
+Le funzioni `MPI_Scatterv()` e `MPI_Gatherv()` (dove la "v" sta per *vector*) sono le versioni estese delle normali operazioni di distribuzione e raccolta. A differenza delle varianti base, permettono di gestire **messaggi di dimensioni irregolari**, di lasciare **spazi vuoti (gaps)** tra i dati e di distribuire o raccogliere le porzioni di array in **qualsiasi ordine**.
+
+> ⚠️ **ATTENZIONE: Altamente Proni all'Errore**
+> Avere questa flessibilità ha un costo altissimo in termini di complessità del codice. L'utilizzo di queste funzioni richiede la costruzione e la gestione manuale di array aggiuntivi per calcolare esattamente quanti elementi spezzare per ogni nodo e da quale indice di memoria farli partire. Sbagliare il calcolo degli indici (offset) o sovrapporre le aree di memoria è estremamente facile e porta a corruzione dei dati o crash del programma. Per questo motivo, **queste funzioni vanno utilizzate solo se strettamente necessario**, ovvero limitatamente a quei casi in cui i dati sono così intrinsecamente irregolari da non poter essere gestiti altrimenti.
+
+#### Argomenti chiave delle funzioni
+Prendendo come esempio la firma di `MPI_Scatterv(sendbuf, sendcnts, displs, sendtype, recvbuf, recvcnt, recvtype, root, comm)`:
+* **`sendcnts`** (o `recvcnts` per la Gatherv): non è più un singolo intero, ma un **array di interi**. Specifica individualmente il numero di elementi (attenzione: elementi, non byte!) destinati a, o provenienti da, ciascun processo.
+* **`displs`** (*displacements*): è un **array di interi**. Specifica l'indice di partenza (l'offset, sempre misurato in numero di elementi) all'interno del buffer di origine da cui estrarre i dati per un determinato processo. 
+
+*(Nota: Per `MPI_Gatherv()`, la logica è speculare ma applicata al buffer di ricezione del root, che utilizzerà un array `recvcnts` e un array `displs` per sapere dove incastrare i dati in arrivo).*
+
+#### Schema di funzionamento (Esempio `MPI_Scatterv`)
+Supponiamo che il **Proc 0** (root) debba distribuire dati di lunghezze diverse a 3 processi, ignorando volutamente alcuni spazi vuoti nel suo array di partenza.
+Dobbiamo definire manualmente:  
+* `sendcnts` = `[ 2, 1, 3 ]` (Il Proc 0 riceve 2 elementi, Proc 1 ne riceve 1, Proc 2 ne riceve 3)  
+* `displs`   = `[ 0, 3, 5 ]` (Gli indici di partenza nel `sendbuf` per ogni processo)  
+
+**Prima della chiamata**  
+Proc 0 (ROOT): `sendbuf = [ A | B | - | C | - | D | E | F ]`   
+*Gli indici sono:*            0   1   2   3   4   5   6   7     
+
+**Dopo la chiamata a `MPI_Scatterv()`**  
+Proc 0: `recvbuf = [ A | B ]`      *(2 elementi partendo dall'indice 0)*  
+Proc 1: `recvbuf = [ C ]`          *(1 elemento partendo dall'indice 3)*  
+Proc 2: `recvbuf = [ D | E | F ]`  *(3 elementi partendo dall'indice 5)*  
+
+#### Esempio di Codice: `MPI_Scatterv()`
+Questo frammento di codice in C dimostra come definire e passare i vettori `sendcnts` e `displs` per il processo root (in questo caso ipotizziamo un totale di 3 processi). 
+
+Questo esempio è particolarmente utile per notare l'estrema flessibilità della funzione: l'uso dei vettori di indici permette non solo di inviare i dati in disordine, ma addirittura di far sovrapporre i segmenti letti dal buffer sorgente [1].
+
+```c
+int sendbuf[] = {10, 11, 12, 13, 14, 15, 16}; /* Dati sorgente sul master (Proc 0) */
+int displs[] = {3, 0, 1};                     /* Vettore degli indici di partenza */
+int sendcnts[] = {3, 1, 4};                   /* Vettore delle lunghezze dei messaggi */
+int recvbuf[2];                               /* Buffer di ricezione per ogni processo */
+
+/* ... (codice di inizializzazione MPI omesso) ... */
+
+MPI_Scatterv(sendbuf, sendcnts, displs, MPI_INT, 
+             recvbuf, 5, MPI_INT, 0, MPI_COMM_WORLD);
+```
 
 
