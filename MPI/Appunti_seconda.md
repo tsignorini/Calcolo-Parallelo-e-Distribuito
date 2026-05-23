@@ -362,4 +362,37 @@ Proc 2: `[ 1 | 2 | 3 ]`
 Proc 3: `[ 1 | 2 | 3 ]`  
 
 
+### MPI_Scatter()
+
+La funzione `MPI_Scatter()` esegue un'operazione di distribuzione dei dati (ed è concettualmente l'inverso di `MPI_Gather()`). Prende un blocco di dati contigui residente su un singolo processo (definito "root"), lo divide in segmenti di uguale dimensione e invia un segmento distinto a ciascun processo all'interno del gruppo (incluso il root stesso).
+
+#### Argomenti della funzione
+La sintassi standard è `MPI_Scatter(sendbuf, sendcnt, sendtype, recvbuf, recvcnt, recvtype, root, comm)`:
+* **`sendbuf`**: puntatore all'array dei dati da suddividere (rilevante e letto solo dal processo `root`).
+* **`sendcnt`**: numero di elementi (non di byte!) inviati a *ciascun singolo processo*, non il totale degli elementi dell'array.
+* **`sendtype`**: tipo di dato degli elementi nel buffer di invio (es. `MPI_INT`).
+* **`recvbuf`**: puntatore all'area di memoria in cui il processo ricevente salverà la propria porzione.
+* **`recvcnt`**: numero di elementi che ciascun processo riceve (solitamente coincide con `sendcnt`).
+* **`recvtype`**: tipo di dato degli elementi nel buffer di ricezione.
+* **`root`**: l'identificativo (rank) del processo che possiede i dati iniziali da sparpagliare.
+* **`comm`**: il comunicatore di riferimento (es. `MPI_COMM_WORLD`).
+
+> 💡 **Nota bene sui parametri di invio e ricezione:**
+> La presenza di parametri distinti per l'invio (`sendcnt`, `sendtype`) e per la ricezione (`recvcnt`, `recvtype`) deriva dal fatto che `MPI_Scatter()` produce lo stesso risultato di una serie di chiamate `MPI_Send` eseguite dal nodo root e di chiamate `MPI_Recv` eseguite da tutti gli altri processi. Questo design non è ridondante, ma permette esplicitamente che **i tipi di dato e le quantità possano essere differenti** tra mittente e destinatario. MPI infatti non richiede che i processi comunicanti utilizzino la stessa rappresentazione dei dati. Tuttavia nella stragrande maggioranza dei casi questi valori coincideranno, infatti cambiare il tipo di dati è fortemente sconsigliato.
+
+#### Schema di funzionamento
+Ecco uno schema di come viene "sparpagliato" l'array. Supponiamo che il **Proc 0** sia il `root` e possegga un array di 12 elementi da distribuire a un totale di 4 processi. In questo caso, `sendcnt` e `recvcnt` varranno 3, poiché ogni processo riceverà 3 elementi.
+
+**Prima della chiamata a `MPI_Scatter()`**
+Proc 0 (ROOT): `sendbuf = [ 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 ]`
+Proc 1:        `recvbuf = [   |   |   ]`
+Proc 2:        `recvbuf = [   |   |   ]`
+Proc 3:        `recvbuf = [   |   |   ]`
+
+**Dopo la chiamata a `MPI_Scatter()`**
+Proc 0: `recvbuf = [ 1 |  2 |  3 ]`
+Proc 1: `recvbuf = [ 4 |  5 |  6 ]`
+Proc 2: `recvbuf = [ 7 |  8 |  9 ]`
+Proc 3: `recvbuf = [ 10| 11 | 12 ]`
+
 
