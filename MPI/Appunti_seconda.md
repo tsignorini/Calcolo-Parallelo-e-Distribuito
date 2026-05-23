@@ -335,7 +335,7 @@ La funzione `MPI_Barrier(comm)` è un'operazione di sincronizzazione collettiva 
 * **Overhead prestazionale:** Trattandosi di un'operazione globale che richiede la partecipazione e l'attesa di tutti i processi del comunicatore, può risultare molto dispendiosa in termini di tempo e rallentare significativamente l'esecuzione del programma.
 * **Spesso evitabile:** In molti casi, l'invocazione di `MPI_Barrier()` dovrebbe essere evitata, poiché la sincronizzazione tra i processi può essere ottenuta in modo più efficiente strutturando correttamente l'indirizzamento esplicito delle comunicazioni (ad esempio sfruttando i `tag`, l'identificativo del mittente `source` o l'isolamento garantito da comunicatori separati).
 
-### MPI_Bcast()
+### MPI_Bcast
 La funzione `MPI_Bcast()` (Broadcast) permette a un singolo processo, definito "root", di inviare una copia esatta degli stessi dati a tutti gli altri processi appartenenti a un determinato gruppo o comunicatore. Essendo un'operazione collettiva, la funzione deve essere obbligatoriamente invocata da tutti i processi del gruppo.
 
 #### Argomenti della funzione
@@ -362,7 +362,7 @@ Proc 2: `[ 1 | 2 | 3 ]`
 Proc 3: `[ 1 | 2 | 3 ]`  
 
 
-### MPI_Scatter()
+### MPI_Scatter
 
 La funzione `MPI_Scatter()` esegue un'operazione di distribuzione dei dati (ed è concettualmente l'inverso di `MPI_Gather()`). Prende un blocco di dati contigui residente su un singolo processo (definito "root"), lo divide in segmenti di uguale dimensione e invia un segmento distinto a ciascun processo all'interno del gruppo (incluso il root stesso).
 
@@ -396,7 +396,7 @@ Proc 2: `recvbuf = [ 7 |  8 |  9 ]`
 Proc 3: `recvbuf = [ 10| 11 | 12 ]`  
 
 
-### MPI_Gather()
+### MPI_Gather
 
 La funzione `MPI_Gather()` implementa una comunicazione collettiva di tipo "molti-a-uno" (all-to-one) ed è l'esatta operazione inversa di `MPI_Scatter()`. Essa raccoglie dati distinti provenienti dai buffer di invio di ciascun processo all'interno del gruppo (incluso il nodo destinatario) e li concatena in ordine di rank nel buffer di ricezione di un singolo processo specificato, definito "root".
 
@@ -445,5 +445,37 @@ Il processo si divide in tre fasi principali:
 
 #### Schema di funzionamento
 ![Immagine descrittiva della somma di un vettore in parallelo.](../immagini/vector_sum.jpeg)
+
+
+### MPI_Allgather()
+
+La funzione `MPI_Allgather()` combina in un'unica operazione la raccolta e la distribuzione globale dei dati. Ogni processo nel comunicatore invia la propria porzione di dati e, al termine dell'operazione, **tutti** i processi possiedono l'intero set di dati concatenato. Concettualmente, equivale a eseguire una `MPI_Gather()` (per raccogliere i dati su un nodo) seguita immediatamente da una `MPI_Bcast()` (per trasmettere il risultato a tutti).
+
+#### Argomenti della funzione
+Poiché il risultato viene distribuito a tutti i nodi, **non è presente l'argomento `root`**. La sintassi standard è `MPI_Allgather(sendbuf, sendcnt, sendtype, recvbuf, recvcnt, recvtype, comm)`:
+* **`sendbuf`**: puntatore all'area di memoria contenente i dati che il singolo processo deve inviare.
+* **`sendcnt`**: numero di elementi inviati dal singolo processo.
+* **`sendtype`**: tipo di dato degli elementi nel buffer di invio.
+* **`recvbuf`**: puntatore all'area di memoria in cui **ogni processo** salverà i dati totali raccolti. *Tutti* i processi devono aver allocato spazio sufficiente per contenere i dati provenienti dall'intero gruppo.
+* **`recvcnt`**: numero di elementi che ciascun processo riceve *da ogni singolo nodo* (non la dimensione totale dell'array finale).
+* **`recvtype`**: tipo di dato degli elementi nel buffer di ricezione.
+* **`comm`**: il comunicatore di riferimento (es. `MPI_COMM_WORLD`).
+
+#### Schema di funzionamento
+Supponiamo di avere 4 processi nel comunicatore. Ognuno di essi possiede un array `sendbuf` di 3 elementi. Impostando `sendcnt = 3` e `recvcnt = 3`, al termine dell'operazione tutti e 4 i processi avranno un array `recvbuf` identico di 12 elementi (ordinati in base al rank del mittente).
+
+**Prima della chiamata a `MPI_Allgather()`**  
+Proc 0: `sendbuf = [  1 |  2 |  3 ]`  
+Proc 1: `sendbuf = [  4 |  5 |  6 ]`  
+Proc 2: `sendbuf = [  7 |  8 |  9 ]`  
+Proc 3: `sendbuf = [ 10 | 11 | 12 ]`  
+
+**Dopo la chiamata a `MPI_Allgather()`**  
+Proc 0: `recvbuf = [ 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 ]`  
+Proc 1: `recvbuf = [ 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 ]`  
+Proc 2: `recvbuf = [ 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 ]`  
+Proc 3: `recvbuf = [ 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 ]`  
+
+
 
 
