@@ -557,3 +557,38 @@ Proc 2:        (Dati inviati al calcolo globale)
 
 ![Immagine descrittiva della somma di un vettore in parallelo con la reduction.](../immagini/reduction_mpi.png)
 
+
+### MPI_Allreduce
+
+La funzione `MPI_Allreduce()` combina in un'unica operazione il calcolo di una riduzione globale e la distribuzione del risultato finale a tutti i nodi partecipanti. In sostanza, esegue un calcolo distribuito (esattamente come fa `MPI_Reduce()`) ma fa in modo che, al termine, **tutti i processi ricevano il risultato finale**, non solo un singolo nodo "root" designato.
+
+> 💡 **Perché è utile e perché preferirla (Reduce + Bcast):**
+> Questa funzione è estremamente utile in scenari (come ad esempio algoritmi iterativi) in cui **ogni processo ha bisogno di conoscere un dato globale per decidere come proseguire** o per effettuare le proprie computazioni locali (ad esempio, calcolare l'errore massimo o totale per verificare se è stato raggiunto un criterio di arresto globale). 
+> 
+> Sebbene il suo effetto sia logicamente e funzionalmente equivalente all'invocare prima una `MPI_Reduce()` sul nodo root e subito dopo una `MPI_Bcast()` per ridistribuire il dato calcolato, conviene **sempre** usare `MPI_Allreduce()`. Oltre a rendere il codice più compatto ed elegante, permette alla libreria MPI di ottimizzare la comunicazione a livello hardware, risultando nettamente più veloce, sicura ed efficiente rispetto a due chiamate di rete separate.
+
+#### Argomenti della funzione
+Poiché il risultato viene automaticamente distribuito a tutti i nodi, **l'argomento `root` scompare** dalla firma della funzione. La sintassi standard è `MPI_Allreduce(sendbuf, recvbuf, count, datatype, op, comm)`:
+* **`sendbuf`**: puntatore all'area di memoria contenente i dati locali del processo da combinare.
+* **`recvbuf`**: puntatore all'area di memoria in cui **tutti i processi** salveranno il risultato finale globale.
+* **`count`**: numero di elementi da processare (anche qui, se > 1 la riduzione è eseguita elemento per elemento).
+* **`datatype`**: tipo di dato degli elementi (es. `MPI_INT`).
+* **`op`**: l'operatore matematico o logico da applicare (es. `MPI_SUM`, `MPI_MAX`, ecc.).
+* **`comm`**: il comunicatore di riferimento (es. `MPI_COMM_WORLD`).
+
+#### Schema di funzionamento
+Supponiamo di avere 4 processi e di voler eseguire una somma globale (`MPI_SUM`) di un singolo elemento (`count = 1`).
+
+**Prima della chiamata a `MPI_Allreduce()`**  
+Proc 0: `sendbuf = [ 0 ]`  
+Proc 1: `sendbuf = [ 3 ]`  
+Proc 2: `sendbuf = [ 2 ]`  
+Proc 3: `sendbuf = [ 4 ]`  
+
+*(Azione interna: esecuzione della `MPI_SUM` globale di 0 + 3 + 2 + 4 = 9 e successiva trasmissione trasparente del risultato)*  
+
+**Dopo la chiamata a `MPI_Allreduce()`**  
+Proc 0: `recvbuf = [ 9 ]`  
+Proc 1: `recvbuf = [ 9 ]`  
+Proc 2: `recvbuf = [ 9 ]`  
+Proc 3: `recvbuf = [ 9 ]`  
