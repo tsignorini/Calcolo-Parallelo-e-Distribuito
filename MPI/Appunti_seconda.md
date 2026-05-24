@@ -636,3 +636,37 @@ Per definizione, queste funzioni esigono che le dimensioni dei messaggi smistati
  2. **Distribuzione del resto tramite le varianti vettoriali (approccio bilanciato):** 
    Per evitare che il root debba fare lavoro extra da solo, la prassi migliore nel calcolo parallelo è distribuire il carico extra. Come avviene tipicamente, l'eventuale sbilanciamento fa sì che ad alcuni processi venga assegnato un elemento in più rispetto agli altri. Per implementare questo a livello di rete non si può usare la `MPI_Scatter()`, ma bisogna ricorrere strettamente a **`MPI_Scatterv()`** o **`MPI_Gatherv()`**. Queste funzioni permettono di specificare dimensioni dei messaggi **irregolari** tramite un array (`sendcnts` o `recvcnts`), dicendo a MPI di inviare, ad esempio, 4 elementi ai primi nodi e 3 elementi ai restanti.
 
+
+
+### MPI_Scan
+
+La funzione `MPI_Scan()` esegue un'operazione di *scan* inclusivo (nota anche come *prefix sum* o somma prefissa parziale) sui dati distribuiti tra i processi di un comunicatore. Come l'operazione di riduzione, applica un operatore matematico o logico associativo ai dati, ma i risultati vengono distribuiti in modo incrementale. Al termine dell'operazione, il buffer di ricezione del processo con rank $j$ conterrà la riduzione (es. la somma) dei soli dati provenienti dai processi con rank da $0$ fino a $j$ (incluso).
+
+#### Argomenti della funzione
+Poiché ogni processo ottiene in uscita un risultato accumulato specifico per la sua posizione, **non è presente l'argomento `root`**. La sintassi standard è `MPI_Scan(sendbuf, recvbuf, count, datatype, op, comm)`:
+* **`sendbuf`**: puntatore all'area di memoria contenente i dati locali del processo da sottoporre a *scan*.
+* **`recvbuf`**: puntatore all'area di memoria in cui il processo salverà il risultato dell'accumulo parziale.
+* **`count`**: numero di elementi da processare. Se `count > 1`, lo *scan* viene calcolato **elemento per elemento** in modo parallelo e indipendente (es. il primo elemento della `recvbuf` del processo $j$ conterrà l'accumulo dei primi elementi dei `sendbuf` dei processi da $0$ a $j$).
+* **`datatype`**: tipo di dato degli elementi.
+* **`op`**: l'operatore matematico o logico da applicare (es. `MPI_SUM`, `MPI_MAX`, ecc.).
+* **`comm`**: il comunicatore di riferimento.
+
+#### Schema di funzionamento
+Supponiamo di avere 4 processi e di voler eseguire uno *scan* inclusivo con l'operatore di somma (`MPI_SUM`) su un singolo elemento (`count = 1`).  
+
+**Prima della chiamata a `MPI_Scan()`**  
+Proc 0: `sendbuf = [ -2 ]`  
+Proc 1: `sendbuf = [  3 ]`  
+Proc 2: `sendbuf = [  9 ]`  
+Proc 3: `sendbuf = [  6 ]`  
+
+*(Azione interna: Il Proc 0 conserva intatto il suo dato, il Proc 1 calcola la somma dei dati di Proc 0 e 1, il Proc 2 dei dati di Proc 0, 1 e 2, il Proc 3 dei dati di Proc 0, 1, 2 e 3)*.  
+
+**Dopo la chiamata a `MPI_Scan()`**  
+Proc 0: `recvbuf = [ -2 ]`  *(Solo dato del Proc 0)*  
+Proc 1: `recvbuf = [  1 ]`  *(-2 + 3)*  
+Proc 2: `recvbuf = [ 10 ]`  *(-2 + 3 + 9)*  
+Proc 3: `recvbuf = [ 16 ]`  *(-2 + 3 + 9 + 6)*  
+
+
+
