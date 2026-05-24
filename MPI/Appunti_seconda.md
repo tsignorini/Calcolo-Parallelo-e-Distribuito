@@ -522,4 +522,38 @@ MPI_Scatterv(sendbuf, sendcnts, displs, MPI_INT,
              recvbuf, 5, MPI_INT, 0, MPI_COMM_WORLD);
 ```
 
+### MPI_Reduce
+
+La funzione `MPI_Reduce()` (che implementa il concetto di *Reduction*) è unica perché combina un'operazione di comunicazione di rete con una di calcolo. Raccoglie i dati provenienti dai buffer di invio di tutti i processi all'interno di un comunicatore, vi applica un'operazione matematica o logica binaria e associativa (come una somma o la ricerca di un minimo) e salva il risultato finale nel buffer di ricezione di un singolo processo specificato, chiamato "root". 
+
+Dal punto di vista algoritmico, questa operazione è altamente ottimizzata: la libreria non invia tutti i dati grezzi al nodo root per farli calcolare a lui, ma distribuisce il calcolo lungo i nodi richiedendo tipicamente solo $O(\log_2 P)$ step di comunicazione per $P$ processi.
+
+#### Argomenti della funzione
+La sintassi standard è `MPI_Reduce(sendbuf, recvbuf, count, datatype, op, root, comm)`:
+* **`sendbuf`**: puntatore all'area di memoria contenente i dati locali del processo da combinare.
+* **`recvbuf`**: puntatore all'area di memoria dove verrà salvato il risultato finale (rilevante e scritto solo per il processo `root`).
+* **`count`**: numero di elementi da processare. **Nota importante:** se `count > 1`, la riduzione non produce un singolo scalare, ma un array, ed è eseguita **elemento per elemento**. Il primo elemento di tutti i processi produrrà il primo elemento del risultato, il secondo con il secondo, ecc.
+* **`datatype`**: tipo di dato degli elementi.
+* **`op`**: l'operatore da applicare (es. `MPI_SUM`, `MPI_MAX`, `MPI_LAND`, ecc.).
+* **`root`**: l'identificativo (rank) del processo che riceverà il risultato finale.
+* **`comm`**: il comunicatore di riferimento.
+
+#### Schema di funzionamento (Riduzione elemento per elemento)
+Ecco uno schema che illustra una riduzione vettoriale. Supponiamo di avere 3 processi, che il **Proc 0** sia il `root` e che ciascun **`sendbuf` sia un array di dimensione 2** (per cui `count = 2`). L'operatore scelto è `MPI_SUM`.
+
+**Prima della chiamata a `MPI_Reduce()`**  
+Proc 0 (ROOT): `sendbuf = [ 5 | 1 ]`  
+Proc 1:        `sendbuf = [ 3 | 2 ]`  
+Proc 2:        `sendbuf = [ 7 | 6 ]`  
+
+*(Azione interna di calcolo `MPI_SUM`)*  
+Indice 0: `5 + 3 + 7 = 15`  
+Indice 1: `1 + 2 + 6 = 9`  
+
+**Dopo la chiamata a `MPI_Reduce()`**  
+Proc 0 (ROOT): `recvbuf = [ 15 |  9 ]`  
+Proc 1:        (Dati inviati al calcolo globale)  
+Proc 2:        (Dati inviati al calcolo globale)  
+
+![Immagine descrittiva della somma di un vettore in parallelo con la reduction.](../immagini/reduction_mpi.png)
 
