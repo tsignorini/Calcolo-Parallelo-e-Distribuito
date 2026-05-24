@@ -711,4 +711,54 @@ La soluzione elegante offerta dallo standard consiste nel **definire un nuovo ti
 Utilizzando funzioni per la costruzione di Derived Datatypes, come ad esempio `MPI_Type_vector()` (che permette di definire vettori di elementi separati da un passo/stride costante), il programmatore "insegna" a MPI come leggere la colonna.
 *   *Perché è la soluzione migliore:* Non ci sono buffer temporanei né spreco di memoria. La libreria MPI, conoscendo ora la struttura esatta dei dati in memoria, si occuperà internamente e in modo ottimizzato di estrarre e trasmettere i byte necessari.
 
+Ecco la sezione dedicata ai Tipi di Dato Derivati, scritta mantenendo lo stile asciutto e di facile consultazione, pronta per essere aggiunta ai tuoi appunti in Markdown:
+
+### I 4 Tipi di Dato Derivati (Derived Datatypes)
+
+La libreria MPI fornisce funzioni specifiche per superare il limite della contiguità in memoria, permettendo di costruire quattro principali categorie di tipi di dato personalizzati a partire da tipi base (o da altri tipi derivati creati in precedenza).
+
+#### 1. Contiguous (Dati Contigui)
+Crea un blocco contiguo composto da copie multiple di un tipo di dato esistente.
+*   **Firma:** `int MPI_Type_contiguous(int count, MPI_Datatype oldtype, MPI_Datatype *newtype)`.  
+*   **Parametri:**  
+    *   `count`: numero di elementi nel blocco.  
+    *   `oldtype`: il tipo di dato di base degli elementi.  
+    *   `newtype`: puntatore al nuovo tipo di dato creato.  
+
+#### 2. Vector (Vettore a spaziatura regolare)
+Definisce un array di blocchi separati da un passo (stride) costante. È ideale per estrarre colonne da matrici memorizzate per righe.
+*   **Firma:** `int MPI_Type_vector(int count, int blocklen, int stride, MPI_Datatype oldtype, MPI_Datatype *newtype)`.  
+*   **Parametri:**  
+    *   `count`: numero totale di blocchi.  
+    *   `blocklen`: numero di elementi contenuti in ciascun blocco.  
+    *   `stride`: numero di elementi che separano l'inizio di un blocco dall'inizio del successivo.  
+    *   `oldtype`: il tipo di dato degli elementi.  
+
+#### 3. Indexed (Spaziatura irregolare)
+Consente di definire un insieme di blocchi aventi lunghezze diverse e separati da spaziature (offset) irregolari.
+*   **Firma:** `int MPI_Type_indexed(int count, const int array_of_blklen[], const int array_of_displ[], MPI_Datatype oldtype, MPI_Datatype *newtype)`.  
+*   **Parametri:**  
+    *   `count`: numero totale di blocchi.  
+    *   `array_of_blklen`: array contenente la lunghezza specifica di ogni singolo blocco.  
+    *   `array_of_displ`: array contenente gli spiazzamenti (misurati in numero di elementi) dell'inizio di ogni blocco rispetto all'inizio della struttura dati.  
+
+#### 4. Struct (Struttura Eterogenea)
+È la forma più generale e flessibile. Permette di definire blocchi di dimensioni diverse, separati da spaziature irregolari e, soprattutto, composti da **tipi di dato differenti** (replicando le `struct` del C).
+*   **Firma:** `int MPI_Type_create_struct(int count, int *array_of_blklen, MPI_Aint *array_of_displ, MPI_Datatype *array_of_types, MPI_Datatype *newtype)`.  
+*   **Parametri chiave (differenze con Indexed):**  
+    *   `array_of_displ`: a differenza di Indexed, gli offset qui sono rigorosamente misurati in **byte** e richiedono l'uso del tipo specifico `MPI_Aint`.  
+    *   `array_of_types`: array contenente i tipi di dato (`MPI_Datatype`) specifici per ciascun blocco.  
+
+
+### Inizializzazione e Terminazione
+
+La semplice dichiarazione o creazione strutturale di un nuovo `MPI_Datatype` non è sufficiente per poterlo utilizzare all'interno delle funzioni di comunicazione di rete. Il ciclo di vita del datatype richiede l'uso di due funzioni fondamentali per interfacciarsi col sistema MPI:
+
+1.  **Commit (Inizializzazione): `MPI_Type_commit(...)`**  
+    *   **Firma:** `int MPI_Type_commit(MPI_Datatype *datatype)`.  
+    *   **Descrizione:** Questa funzione "registra" formalmente il nuovo tipo derivato nel sistema runtime di MPI, compilandone la mappa di memoria. **Deve essere obbligatoriamente invocata** prima di usare il `datatype` in qualsiasi operazione di comunicazione (es. `MPI_Send` o `MPI_Recv`).  
+
+2.  **Free (Terminazione): `MPI_Type_free(...)`**  
+    *   **Firma:** `int MPI_Type_free(MPI_Datatype *datatype)`.  
+    *   **Descrizione:** Quando il tipo derivato non è più necessario, questa funzione deve essere invocata per deallocare in modo sicuro le risorse di memoria interne che MPI aveva riservato per descrivere l'oggetto, evitando *memory leak*.  
 
