@@ -684,4 +684,5 @@ In sintesi, tutte le funzioni che abbiamo esplorato si dividono in tre grandi ma
 * **Movimentazione dei dati** (`MPI_Bcast`, `MPI_Scatter(v)`, `MPI_Gather(v)`, `MPI_Allgather`, `MPI_Alltoall`): per distribuire, raccogliere o scambiare informazioni senza alterarle.
 * **Computazione e Riduzione** (`MPI_Reduce`, `MPI_Allreduce`, `MPI_Scan`): per combinare l'aggregazione di rete con calcoli matematici e logici globali.
 
+## MPI Datatypes
 
