@@ -762,3 +762,33 @@ La semplice dichiarazione o creazione strutturale di un nuovo `MPI_Datatype` non
     *   **Firma:** `int MPI_Type_free(MPI_Datatype *datatype)`.  
     *   **Descrizione:** Quando il tipo derivato non è più necessario, questa funzione deve essere invocata per deallocare in modo sicuro le risorse di memoria interne che MPI aveva riservato per descrivere l'oggetto, evitando *memory leak*.  
 
+
+### MPI_Type_contiguous()
+
+La funzione `MPI_Type_contiguous()` è il metodo più semplice per creare un nuovo tipo di dato derivato. Essa permette di raggruppare un numero prefissato (`count`) di elementi adiacenti in memoria di un tipo già esistente (`oldtype`) per formare un unico blocco logico contiguo. 
+
+Questo costrutto è perfetto per il linguaggio C, in cui le matrici sono allocate in memoria per righe (*row-major order*), rendendo gli elementi di una singola riga fisicamente adiacenti l'uno all'altro. Invece di inviare i singoli elementi o passare un `count` elevato alla funzione di rete, possiamo definire un datatype che rappresenti esattamente il concetto logico di "riga" e trasmetterla come una singola entità.
+
+#### Esempio: Spedire una riga di una matrice
+Supponiamo di avere una matrice quadrata `a` 4x4 composta da `float` e di voler spedire l'intera terza riga (ovvero quella all'indice 2, partendo dall'elemento `a`).
+
+```c
+int count = 4; /* Numero di elementi contigui (la lunghezza della riga) */
+MPI_Datatype rowtype;
+
+/* 1. Definizione del nuovo tipo formato da 4 MPI_FLOAT contigui */
+MPI_Type_contiguous(count, MPI_FLOAT, &rowtype);
+
+/* 2. Registrazione (Commit) del tipo nel sistema MPI prima dell'uso */
+MPI_Type_commit(&rowtype);
+
+/* 3. Invio della terza riga (indice 2) */
+/* Passiamo l'indirizzo di partenza della riga &a e chiediamo a MPI 
+   di inviare esattamente 1 blocco del nuovo tipo 'rowtype' */
+MPI_Send(&a[2][0], 1, rowtype, dest, tag, MPI_COMM_WORLD);
+
+/* ... a fine programma ... */
+MPI_Type_free(&rowtype);
+```
+
+In questo modo, la funzione di invio sa che deve leggere esattamente 4 elementi di tipo `float` a partire dall'indirizzo di memoria `&a` e li trasmetterà in un unico blocco ottimizzato.
