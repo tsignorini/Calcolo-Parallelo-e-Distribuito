@@ -686,3 +686,29 @@ In sintesi, tutte le funzioni che abbiamo esplorato si dividono in tre grandi ma
 
 ## MPI Datatypes
 
+In MPI, qualsiasi operazione di comunicazione (invio o ricezione) richiede la definizione dei dati tramite una specifica tripletta: l'indirizzo di memoria di partenza (`address`), il numero di elementi da trasmettere (`count`) e il tipo di dato (`datatype`). 
+
+Oltre ai tipi predefiniti che mappano i tipi standard del linguaggio C (come `MPI_INT` per gli `int` o `MPI_DOUBLE` per i `double`), MPI offre la potentissima funzionalità dei **Tipi di Dato Derivati (Derived Datatypes)**. Questa caratteristica permette di superare uno dei limiti fisici della memoria: la necessità di avere dati contigui per le comunicazioni di rete. MPI permette infatti di definire tipi di dato personalizzati formati da blocchi spaziati in modo regolare, irregolare o composti da tipi eterogenei (struct).
+
+Per comprendere la necessità vitale di questa astrazione, analizziamo un problema classico del calcolo parallelo: la suddivisione di un dominio bidimensionale.
+
+#### Il Problema: Lo scambio di Colonne (Ghost Cells)
+Immaginiamo una matrice bidimensionale suddivisa a blocchi verticali tra vari processi. Ad ogni iterazione, un processo deve inviare la sua colonna più esterna al processo vicino. 
+Nel linguaggio C, le matrici sono memorizzate per righe (*row-wise*). Questo significa che, mentre gli elementi di una riga sono fisicamente contigui in memoria, **gli elementi di una colonna non lo sono**. Come possiamo inviare questi dati sparsi in un unico blocco?
+
+Ecco l'evoluzione delle soluzioni, dalla peggiore alla migliore:
+
+**1. La soluzione CATTIVA (The BAD solution)**
+L'approccio più ingenuo consiste nell'inviare ogni singolo elemento della colonna tramite chiamate individuali alla funzione `MPI_Send` (o `MPI_Isend`). 
+*   *Perché è cattiva:* Eseguire decine o centinaia di chiamate di rete per inviare un singolo scalare ciascuna genera un overhead (tempo di latenza/start-up) enorme, uccidendo letteralmente le prestazioni del programma parallelo.
+
+**2. La soluzione BRUTTA (The UGLY solution)**
+Il programmatore cerca di rimediare all'overhead di rete allocando un array temporaneo (buffer). I dati sparsi della colonna vengono letti uno a uno tramite un ciclo `for` e copiati (impacchettati) in questo array temporaneo in modo che diventino contigui. A questo punto si fa un'unica `MPI_Send` del buffer. Il ricevente fa la stessa cosa al contrario: riceve il buffer e lo spacchetta nella colonna di destinazione.
+*   *Perché è brutta:* Sebbene riduca le chiamate di rete, questa soluzione spreca memoria (per allocare i buffer temporanei) e cicli di CPU (per copiare e ricopiare manualmente i dati da una zona all'altra della memoria).
+
+**3. La soluzione OTTIMALE (The GOOD solution)**
+La soluzione elegante offerta dallo standard consiste nel **definire un nuovo tipo di dato MPI** che descriva esattamente la forma della colonna in memoria, per poi passarlo direttamente a una singola chiamata `MPI_Send`.
+Utilizzando funzioni per la costruzione di Derived Datatypes, come ad esempio `MPI_Type_vector()` (che permette di definire vettori di elementi separati da un passo/stride costante), il programmatore "insegna" a MPI come leggere la colonna.
+*   *Perché è la soluzione migliore:* Non ci sono buffer temporanei né spreco di memoria. La libreria MPI, conoscendo ora la struttura esatta dei dati in memoria, si occuperà internamente e in modo ottimizzato di estrarre e trasmettere i byte necessari.
+
+
