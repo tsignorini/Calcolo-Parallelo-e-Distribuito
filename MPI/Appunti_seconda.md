@@ -698,15 +698,15 @@ Nel linguaggio C, le matrici sono memorizzate per righe (*row-wise*). Questo sig
 
 Ecco l'evoluzione delle soluzioni, dalla peggiore alla migliore:
 
-**1. La soluzione CATTIVA (The BAD solution)**
+**1. La soluzione CATTIVA**  
 L'approccio più ingenuo consiste nell'inviare ogni singolo elemento della colonna tramite chiamate individuali alla funzione `MPI_Send` (o `MPI_Isend`). 
 *   *Perché è cattiva:* Eseguire decine o centinaia di chiamate di rete per inviare un singolo scalare ciascuna genera un overhead (tempo di latenza/start-up) enorme, uccidendo letteralmente le prestazioni del programma parallelo.
 
-**2. La soluzione BRUTTA (The UGLY solution)**
+**2. La soluzione BRUTTA**  
 Il programmatore cerca di rimediare all'overhead di rete allocando un array temporaneo (buffer). I dati sparsi della colonna vengono letti uno a uno tramite un ciclo `for` e copiati (impacchettati) in questo array temporaneo in modo che diventino contigui. A questo punto si fa un'unica `MPI_Send` del buffer. Il ricevente fa la stessa cosa al contrario: riceve il buffer e lo spacchetta nella colonna di destinazione.
 *   *Perché è brutta:* Sebbene riduca le chiamate di rete, questa soluzione spreca memoria (per allocare i buffer temporanei) e cicli di CPU (per copiare e ricopiare manualmente i dati da una zona all'altra della memoria).
 
-**3. La soluzione OTTIMALE (The GOOD solution)**
+**3. La soluzione OTTIMALE**  
 La soluzione elegante offerta dallo standard consiste nel **definire un nuovo tipo di dato MPI** che descriva esattamente la forma della colonna in memoria, per poi passarlo direttamente a una singola chiamata `MPI_Send`.
 Utilizzando funzioni per la costruzione di Derived Datatypes, come ad esempio `MPI_Type_vector()` (che permette di definire vettori di elementi separati da un passo/stride costante), il programmatore "insegna" a MPI come leggere la colonna.
 *   *Perché è la soluzione migliore:* Non ci sono buffer temporanei né spreco di memoria. La libreria MPI, conoscendo ora la struttura esatta dei dati in memoria, si occuperà internamente e in modo ottimizzato di estrarre e trasmettere i byte necessari.
