@@ -763,7 +763,7 @@ La semplice dichiarazione o creazione strutturale di un nuovo `MPI_Datatype` non
     *   **Descrizione:** Quando il tipo derivato non è più necessario, questa funzione deve essere invocata per deallocare in modo sicuro le risorse di memoria interne che MPI aveva riservato per descrivere l'oggetto, evitando *memory leak*.  
 
 
-### MPI_Type_contiguous()
+### MPI_Type_contiguous
 
 La funzione `MPI_Type_contiguous()` è il metodo più semplice per creare un nuovo tipo di dato derivato. Essa permette di raggruppare un numero prefissato (`count`) di elementi adiacenti in memoria di un tipo già esistente (`oldtype`) per formare un unico blocco logico contiguo. 
 
@@ -792,3 +792,54 @@ MPI_Type_free(&rowtype);
 ```
 
 In questo modo, la funzione di invio sa che deve leggere esattamente 4 elementi di tipo `float` a partire dall'indirizzo di memoria `&a` e li trasmetterà in un unico blocco ottimizzato.
+
+Ecco la sezione dedicata a `MPI_Type_vector()`, con la spiegazione dettagliata e l'esempio della matrice tratto direttamente dalle slide, pronta da copiare in formato Markdown:
+
+
+### MPI_Type_vector
+
+La funzione `MPI_Type_vector()` permette di creare un nuovo tipo di dato costituito da un array di blocchi separati tra loro da una spaziatura regolare (stride). 
+
+Il caso d'uso classico e più importante per questa funzione in linguaggio C è l'**estrazione di una colonna da una matrice**. Poiché in C le matrici sono memorizzate per righe (*row-major order*), gli elementi di una riga sono contigui, ma quelli di una colonna sono separati in memoria da un numero di elementi pari alla larghezza della riga stessa. `MPI_Type_vector()` permette di istruire MPI su come "saltare" da una riga all'altra per leggere solo i dati della colonna desiderata.
+
+#### Parametri Chiave
+La firma della funzione è `MPI_Type_vector(count, blocklen, stride, oldtype, &newtype)`:  
+*   **`count`**: numero totale di blocchi da leggere.  
+*   **`blocklen`**: numero di elementi che compongono un singolo blocco.  
+*   **`stride`**: il "passo", ovvero il numero di elementi che separano l'inizio di un blocco dall'inizio del successivo.  
+
+#### Esempio: Spedire una colonna di una matrice
+Consideriamo una matrice `a` di tipo `float` e supponiamo di voler estrarre e spedire la **seconda colonna** (quella all'indice 1).
+
+La matrice in memoria ha i seguenti valori contigui:
+`[ 1.0, 2.0, 3.0, 4.0 | 5.0, 6.0, 7.0, 8.0 | 9.0, 10.0, 11.0, 12.0 | 13.0, 14.0, 15.0, 16.0 ]`
+
+Vogliamo estrarre la colonna composta dai valori: `2.0`, `6.0`, `10.0`, `14.0`.
+Per farlo definiamo la geometria del vettore:
+*   `count = 4` (vogliamo 4 elementi in totale, uno per ogni riga).
+*   `blocklen = 1` (ogni elemento della colonna è un singolo float).
+*   `stride = 4` (per passare da `2.0` a `6.0` dobbiamo fare un salto di 4 posizioni in memoria, pari alla larghezza della riga).
+
+```c
+/* Definizione dei parametri per estrarre una singola colonna da una matrice 4x4 */
+int count = 4;
+int blocklen = 1;
+int stride = 4;
+MPI_Datatype columntype;
+
+/* 1. Creazione del tipo derivato vettore */
+MPI_Type_vector(count, blocklen, stride, MPI_FLOAT, &columntype);
+
+/* 2. Registrazione (Commit) del tipo nel sistema MPI */
+MPI_Type_commit(&columntype);
+
+/* 3. Invio della seconda colonna */
+/* Passiamo come indirizzo di partenza a, ovvero il valore 2.0.
+   Da lì, MPI estrarrà 1 blocco di tipo 'columntype', saltando di 4 in 4 */
+MPI_Send(&a[0][1], 1, columntype, dest, tag, MPI_COMM_WORLD);
+
+/* ... a fine programma ... */
+MPI_Type_free(&columntype);
+```
+
+In questo modo, con una singola istruzione `MPI_Send` e senza dover copiare i dati in buffer temporanei, la libreria estrarrà e invierà esattamente i valori `2.0, 6.0, 10.0, 14.0`.
