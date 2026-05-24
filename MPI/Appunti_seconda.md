@@ -592,3 +592,47 @@ Proc 0: `recvbuf = [ 9 ]`
 Proc 1: `recvbuf = [ 9 ]`  
 Proc 2: `recvbuf = [ 9 ]`  
 Proc 3: `recvbuf = [ 9 ]`  
+
+
+### MPI_Alltoall
+
+La funzione `MPI_Alltoall()` è una potente operazione di movimento dati (comunicazione "tutti-a-tutti"). Funziona in modo tale che **ogni processo all'interno del gruppo esegua una propria operazione di distribuzione (`MPI_Scatter()`)** verso tutti gli altri processi. 
+
+In sostanza, ciascun processo divide il proprio buffer di invio in tanti blocchi quanti sono i processi nel comunicatore e invia il blocco *i-esimo* al processo con rank *i*. Al termine dell'esecuzione, il buffer di ricezione di ciascun processo sarà costituito dalla concatenazione dei blocchi ricevuti da tutti gli altri nodi, ordinati in base all'indice (rank) del mittente.
+
+#### Argomenti della funzione
+Poiché non c'è un singolo nodo "root" (tutti inviano e tutti ricevono), l'argomento `root` è assente. La sintassi standard è `MPI_Alltoall(sendbuf, sendcnt, sendtype, recvbuf, recvcnt, recvtype, comm)`:
+* **`sendbuf`**: puntatore all'area di memoria contenente i dati che il processo deve inviare.
+* **`sendcnt`**: numero di elementi che il processo invia a *ciascun singolo nodo* (non la dimensione totale del buffer).
+* **`sendtype`**: tipo di dato degli elementi nel buffer di invio.
+* **`recvbuf`**: puntatore all'area di memoria in cui il processo salverà i blocchi ricevuti. Deve essere grande abbastanza da contenere i dati provenienti da tutti i processi.
+* **`recvcnt`**: numero di elementi che il processo si aspetta di ricevere *da ciascun singolo nodo*.
+* **`recvtype`**: tipo di dato degli elementi nel buffer di ricezione.
+* **`comm`**: il comunicatore di riferimento (es. `MPI_COMM_WORLD`).
+
+#### Schema di funzionamento
+Supponiamo di avere 4 processi e che ogni processo voglia inviare un blocco di 2 elementi (`sendcnt = 2`, `recvcnt = 2`) a ciascun altro processo. Ciascun `sendbuf` sarà lungo 8 elementi totali (4 blocchi da 2 elementi).
+
+**Prima della chiamata a `MPI_Alltoall()`**  
+Il Proc 0 invierà il primo blocco a se stesso, il secondo al Proc 1, ecc.  
+Proc 0: `sendbuf = [  1,  2 |  3,  4 |  5,  6 |  7,  8 ]`  
+Proc 1: `sendbuf = [  9, 10 | 11, 12 | 13, 14 | 15, 16 ]`  
+Proc 2: `sendbuf = [ 17, 18 | 19, 20 | 21, 22 | 23, 24 ]`  
+Proc 3: `sendbuf = [ 25, 26 | 27, 28 | 29, 30 | 31, 32 ]`  
+
+**Dopo la chiamata a `MPI_Alltoall()`**  
+Il buffer di ricezione di ogni processo viene riempito assemblando, in ordine di rank, la porzione di dati che ciascun processo aveva preparato appositamente per lui.  
+Proc 0: `recvbuf = [  1,  2 |  9, 10 | 17, 18 | 25, 26 ]`  
+Proc 1: `recvbuf = [  3,  4 | 11, 12 | 19, 20 | 27, 28 ]`  
+Proc 2: `recvbuf = [  5,  6 | 13, 14 | 21, 22 | 29, 30 ]`  
+Proc 3: `recvbuf = [  7,  8 | 15, 16 | 23, 24 | 31, 32 ]`  
+
+
+### 💡 **Postilla sulla divisibilità dei dati e gestione del resto:**  
+È fondamentale ricordare che le funzioni collettive base come `MPI_Scatter()` e `MPI_Gather()` **non gestiscono autonomamente i resti** della divisione dei dati, né assegnano automaticamente l'eccesso al processo root. 
+Per definizione, queste funzioni esigono che le dimensioni dei messaggi smistati siano **strettamente uniformi**: ogni processo deve ricevere o inviare esattamente lo stesso quantitativo di elementi indicato in `sendcnt` o `recvcnt`. Se l'ammontare dei dati $N$ non è perfettamente divisibile per il numero di processori $P$, il programmatore deve farsi carico di gestire l'eccesso. Può farlo in due modi:
+1. **Elaborazione manuale sul root (approccio "Safe" ma sbilanciato):**  
+ Il programmatore calcola la dimensione base dei blocchi con una divisione intera (`sendcnt = N / P`) e usa la normale `MPI_Scatter()`. I dati in eccesso (`N % P`) non verranno passati alla funzione collettiva e resteranno nella memoria del processo root. Quest'ultimo, dopo aver distribuito le parti uguali a tutti (incluso se stesso), dovrà avere una porzione di codice dedicata per elaborare localmente i dati rimanenti.
+ 2. **Distribuzione del resto tramite le varianti vettoriali (approccio bilanciato):** 
+   Per evitare che il root debba fare lavoro extra da solo, la prassi migliore nel calcolo parallelo è distribuire il carico extra. Come avviene tipicamente, l'eventuale sbilanciamento fa sì che ad alcuni processi venga assegnato un elemento in più rispetto agli altri. Per implementare questo a livello di rete non si può usare la `MPI_Scatter()`, ma bisogna ricorrere strettamente a **`MPI_Scatterv()`** o **`MPI_Gatherv()`**. Queste funzioni permettono di specificare dimensioni dei messaggi **irregolari** tramite un array (`sendcnts` o `recvcnts`), dicendo a MPI di inviare, ad esempio, 4 elementi ai primi nodi e 3 elementi ai restanti.
+
