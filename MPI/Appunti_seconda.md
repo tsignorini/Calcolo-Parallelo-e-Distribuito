@@ -889,3 +889,32 @@ MPI_Type_free(&newtype);
 
 In questo esempio, con una singola istruzione `MPI_Send` in cui indichiamo di inviare `1` solo blocco logico di tipo `newtype`, la libreria navigherà l'array originale ed estrarrà per la trasmissione esattamente gli 8 valori desiderati (`3.0, 6.0, 7.0, 8.0, 13.0, 14.0, 15.0, 16.0`). Il destinatario riceverà questi 8 valori "compattati" nel suo array di ricezione.
 
+
+### Combinare i Tipi Derivati (Componibilità)
+
+Una delle caratteristiche più potenti dei *Derived Datatypes* di MPI è la loro totale componibilità. Il parametro `oldtype` richiesto dalle funzioni di creazione (come `MPI_Type_contiguous`, `MPI_Type_vector` e `MPI_Type_indexed`) non deve necessariamente essere un tipo predefinito (es. `MPI_FLOAT` o `MPI_INT`), ma può essere **un altro tipo derivato creato in precedenza dal programmatore**. 
+
+Questo approccio a "scatole cinesi" permette di mappare e trasmettere strutture dati gerarchiche e complesse con estrema eleganza.
+
+#### Esempio: Un vettore di vettori
+In questo esempio, creiamo prima un vettore logico (`vec`) composto da elementi base `MPI_FLOAT`, e poi lo utilizziamo a sua volta come mattoncino base (`oldtype`) per creare un tipo ancora più complesso (`vecvec`).
+
+```c
+int count, blocklen, stride; 
+MPI_Datatype vec, vecvec;
+
+/* 1. Creiamo il primo tipo derivato (un vettore base di float) */
+count = 2; blocklen = 2; stride = 3;
+MPI_Type_vector(count, blocklen, stride, MPI_FLOAT, &vec);
+MPI_Type_commit(&vec);
+
+/* 2. Usiamo 'vec' appena creato come 'oldtype' per un nuovo vettore */
+count = 2; blocklen = 1; stride = 3;
+MPI_Type_vector(count, blocklen, stride, vec, &vecvec);
+MPI_Type_commit(&vecvec);
+
+/* A fine utilizzo, ricordarsi di liberare entrambi i tipi */
+/* MPI_Type_free(&vec); */
+/* MPI_Type_free(&vecvec); */
+```
+
