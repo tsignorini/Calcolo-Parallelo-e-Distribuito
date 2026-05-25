@@ -843,3 +843,49 @@ MPI_Type_free(&columntype);
 ```
 
 In questo modo, con una singola istruzione `MPI_Send` e senza dover copiare i dati in buffer temporanei, la libreria estrarrà e invierà esattamente i valori `2.0, 6.0, 10.0, 14.0`.
+
+### MPI_Type_indexed
+
+La funzione `MPI_Type_indexed()` permette di creare un nuovo tipo di dato costituito da un insieme di blocchi di elementi che presentano sia lunghezze irregolari sia spaziature (offset) irregolari tra di loro.
+
+A differenza di `MPI_Type_vector`, in cui la dimensione del blocco e il passo (stride) sono costanti, qui il programmatore deve fornire esplicitamente due array: uno per specificare la lunghezza di ciascun blocco e un altro per indicarne la posizione (lo spiazzamento) rispetto all'inizio del buffer. Tutti gli spiazzamenti si misurano in *numero di elementi* (non in byte) del tipo di dato originario.
+
+#### Parametri Chiave
+La firma della funzione è `MPI_Type_indexed(int count, const int array_of_blklen[], const int array_of_displ[], MPI_Datatype oldtype, MPI_Datatype *newtype)`:
+*   **`count`**: numero totale di blocchi che compongono il nuovo tipo.
+*   **`array_of_blklen`**: array che contiene la lunghezza specifica (numero di elementi) per ogni singolo blocco.
+*   **`array_of_displ`**: array che contiene l'offset (in numero di elementi) di ciascun blocco rispetto all'indirizzo di partenza.
+
+#### Esempio: Estrarre blocchi irregolari da un array
+Consideriamo un array `a` di 16 `float` con i valori sequenziali da `1.0` a `16.0`. Vogliamo estrarre tre frammenti specifici ed eterogenei:
+1. Un primo blocco di **1 elemento** partendo dall'indice **2** (valore `3.0`).
+2. Un secondo blocco di **3 elementi** partendo dall'indice **5** (valori `6.0, 7.0, 8.0`).
+3. Un terzo blocco di **4 elementi** partendo dall'indice **12** (valori `13.0, 14.0, 15.0, 16.0`).
+
+```c
+/* Definizione dei parametri per i 3 blocchi irregolari */
+int count = 3;
+int blklens[] = {1, 3, 4};  /* Array delle lunghezze dei blocchi */
+int displs[] = {2, 5, 12};  /* Array degli indici di partenza */
+MPI_Datatype newtype;
+
+/* 1. Creazione del tipo derivato indicizzato */
+MPI_Type_indexed(count, blklens, displs, MPI_FLOAT, &newtype);
+
+/* 2. Registrazione (Commit) del tipo nel sistema MPI */
+MPI_Type_commit(&newtype);
+
+/* 3. Invio dei dati */
+/* Passando l'indirizzo di partenza &a, MPI applicherà gli spiazzamenti in displs[]
+   ed estrarrà esattamente i 3 blocchi descritti in blklens[] */
+MPI_Send(&a[0], 1, newtype, dest, tag, MPI_COMM_WORLD);
+
+/* Ricezione lato destinatario (il processo riceverà 8 elementi contigui in totale) */
+/* MPI_Recv(&b[0], 8, MPI_FLOAT, src, tag, MPI_COMM_WORLD, MPI_STATUS_IGNORE); */
+
+/* ... a fine programma ... */
+MPI_Type_free(&newtype);
+```
+
+In questo esempio, con una singola istruzione `MPI_Send` in cui indichiamo di inviare `1` solo blocco logico di tipo `newtype`, la libreria navigherà l'array originale ed estrarrà per la trasmissione esattamente gli 8 valori desiderati (`3.0, 6.0, 7.0, 8.0, 13.0, 14.0, 15.0, 16.0`). Il destinatario riceverà questi 8 valori "compattati" nel suo array di ricezione.
+
