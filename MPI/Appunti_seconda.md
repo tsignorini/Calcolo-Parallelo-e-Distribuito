@@ -918,3 +918,88 @@ MPI_Type_commit(&vecvec);
 /* MPI_Type_free(&vecvec); */
 ```
 
+### MPI_Type_create_struct
+
+La funzione `MPI_Type_create_struct()` è la forma più generale e flessibile per la creazione di tipi di dato derivati. Permette di definire un nuovo tipo composto da un insieme di blocchi spaziati in modo irregolare e, soprattutto, costituiti da **tipi di dato esistenti differenti tra loro**.
+
+Questo costrutto è fondamentale perché mappa direttamente le **`struct`** del linguaggio C in MPI. Consente infatti di trasmettere un'intera struttura dati eterogenea attraverso la rete in un'unica operazione di comunicazione ottimizzata, evitando di dover spacchettare i campi o inviare messaggi multipli.
+
+#### Parametri Chiave
+A differenza delle altre funzioni (come `MPI_Type_indexed`), in cui le spaziature si misurano in "numero di elementi", qui i blocchi hanno tipi base di dimensioni diverse. Di conseguenza, tutti gli offset devono essere rigorosamente misurati in **byte**. Per farlo si utilizza un tipo di dato intero speciale offerto da MPI: `MPI_Aint`.
+
+La firma della funzione è `int MPI_Type_create_struct(int count, int *array_of_blklen, MPI_Aint *array_of_displ, MPI_Datatype *array_of_types, MPI_Datatype *newtype)`:
+*   **`count`**: numero totale di blocchi che compongono la struttura.
+*   **`array_of_blklen`**: array contenente il numero di elementi per ciascun singolo blocco.
+*   **`array_of_displ`**: array di tipo `MPI_Aint` contenente lo spiazzamento (offset) **in byte** di ciascun blocco rispetto all'indirizzo di partenza.
+*   **`array_of_types`**: array contenente i tipi di dato (`MPI_Datatype`) specifici per ciascun blocco.
+
+#### Esempio: Spedire una struct C eterogenea
+Consideriamo una struttura `particle_t` utilizzata per rappresentare una particella in una simulazione, composta da coordinate/velocità (4 `float`) e da metadati interi (2 `int`):
+
+```c
+typedef struct {
+    float x, y, z, v;
+    int n, t;
+} particle_t;
+```
+
+Per insegnare a MPI come mappare questa struct in memoria, dobbiamo descriverla come formata da 2 blocchi distinti,:
+1. Un primo blocco di **4 elementi** di tipo `MPI_FLOAT` con offset 0 byte.
+2. Un secondo blocco di **2 elementi** di tipo `MPI_INT` il cui offset in byte inizierà esattamente dove finiscono i 4 float.
+
+```c
+/* Parametri per descrivere la geometria della struct */
+int count = 2;
+int blklens[2];
+MPI_Aint displs[2], lb, extent;
+MPI_Datatype oldtypes[2], newtype;
+
+/* Configurazione del 1° blocco: 4 float (x, y, z, v) */
+oldtypes[0] = MPI_FLOAT;
+blklens[0] = 4;
+displs[0] = 0; /* Il primo blocco parte dall'inizio (offset 0) */
+
+/* Chiediamo a MPI di calcolare l'ingombro (extent) in byte del tipo float */
+MPI_Type_get_extent(MPI_FLOAT, &lb, &extent);
+
+/* Configurazione del 2° blocco: 2 int (n, t) */
+oldtypes[1] = MPI_INT;
+blklens[1] = 2;
+/* L'offset in byte del secondo blocco è pari all'ingombro di 4 float */
+displs[1] = 4 * extent;
+
+/* 1. Creazione del tipo derivato struct */
+MPI_Type_create_struct(count, blklens, displs, oldtypes, &newtype);
+
+/* 2. Registrazione (Commit) del tipo nel sistema MPI */
+MPI_Type_commit(&newtype);
+
+/* 3. Utilizzo per la spedizione */
+/* Ora la struct può essere spedita interamente con una singola istruzione */
+/* particle_t my_particle; */
+/* MPI_Send(&my_particle, 1, newtype, dest, tag, MPI_COMM_WORLD); */
+
+/* ... a fine programma ... */
+MPI_Type_free(&newtype);
+```
+
+### Conclusione: Ottimizzazione e considerazioni finali su MPI
+
+Per chiudere l'argomento sui **Derived Datatypes** e fare un bilancio finale sulla programmazione MPI, possiamo riassumere i concetti chiave in due grandi aspetti: l'ottimizzazione della memoria e le sfide generali del *message passing*.
+
+#### Il ruolo cruciale dei Tipi Derivati
+I *Derived Datatypes* (Contiguous, Vector, Indexed e Struct) rappresentano lo strumento "ottimale" messo a disposizione dallo standard MPI per scambiare dati non contigui in memoria. 
+Sfruttandoli, il programmatore riesce a:
+1. **Evitare l'overhead di rete:** Scongiurando la soluzione "cattiva", ovvero l'invio di decine di messaggi minuscoli per ogni singolo dato frammentato.
+2. **Risparmiare CPU e Memoria:** Evitando la soluzione "brutta", ovvero lo spreco di cicli macchina necessari per copiare e impacchettare (pack/unpack) manualmente i dati in array temporanei prima dell'invio.
+3. **Mappare strutture complesse:** Creando gerarchie di tipi componibili che ricalcano fedelmente le strutture dati eterogenee del linguaggio C.
+
+## Considerazioni finali sul modello MPI
+Allargando lo sguardo all'intero ecosistema MPI, è importante riconoscere la natura di questo standard. Il *message passing* è un modello di programmazione fondamentale, ma di **bassissimo livello e decisamente "pesante" (heavy weight)**.
+
+Scrivere programmi MPI richiede uno sforzo notevole da parte dello sviluppatore, e presenta sfide precise:
+* **Codice prolisso:** Gran parte del costo di sviluppo deriva dalla quantità di codice locale necessario per gestire la logica di rete. Molto spesso, il codice dedicato unicamente alla comunicazione supera la metà delle righe totali del programma.
+* **Difficoltà di progettazione:** Progettare un'applicazione MPI che sia adattabile, flessibile e del tutto priva di errori (come i temuti *deadlock*) è estremamente complesso (in inglese: *tough to get right*).
+
+Tuttavia, nonostante queste intrinseche difficoltà di sviluppo, MPI rimane il **modello di programmazione d'elezione in assoluto per la scalabilità**. La sua immensa diffusione e adozione globale sono garantite dalla sua **portabilità** tra sistemi diversi. Imparare a padroneggiare strumenti come le *comunicazioni collettive* e i *Tipi Derivati* è il prezzo da pagare per poter estrarre fino all'ultimo *flop* di potenza di calcolo dai moderni supercalcolatori distribuiti.
+
