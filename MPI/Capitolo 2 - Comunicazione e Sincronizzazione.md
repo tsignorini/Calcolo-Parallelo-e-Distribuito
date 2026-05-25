@@ -1,4 +1,4 @@
-# MPI Communications
+# Comunicazione e Sincronizzazione
 
 ## Comunicazione tra Processi
 
