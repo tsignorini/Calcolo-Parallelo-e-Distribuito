@@ -84,4 +84,5 @@ Il modello di memoria di CUDA prevede spazi di memoria distinti, caratterizzati 
 4.  **Memoria Globale (Global Memory):** È lo spazio di memoria più capiente della GPU (misurabile in Gigabyte), accessibile in lettura e scrittura da *tutti* i thread di qualsiasi blocco, oltre che dall'Host (tramite bus PCIe). Tuttavia, è "off-chip", il che comporta latenze molto elevate (centinaia di cicli di clock). L'accesso a questa memoria dovrebbe sempre essere ottimizzato tramite accessi "coalescenti" per sfruttare la banda passante.
 5.  **Memoria Costante (Constant Memory) e Texture Memory:** Sono porzioni specifiche della lenta memoria globale che godono però di **cache hardware dedicate on-chip**. Sono accessibili in sola lettura da parte dei thread della GPU (possono essere scritte solo dall'Host). La memoria costante è ottimizzata per distribuire in un colpo solo lo stesso valore a tutto un *warp* di thread, mentre la Texture Memory è ottimizzata per sfruttare la località spaziale 2D, rivelandosi utile in specifici pattern di accesso.
 
+![Immagine descrittiva dell'architettura di una GPU.](../immagini/gpu_architectures.png)
 
