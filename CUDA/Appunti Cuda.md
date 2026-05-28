@@ -52,11 +52,36 @@ Poiché la GPU opera sui propri banchi di memoria, il primo passo spetta all'Hos
 ### 2. Esecuzione del programma GPU (Kernel)
 Una volta che i dati sono presenti e pronti sulla scheda video, la CPU carica e lancia l'esecuzione del programma parallelo sulla GPU, noto come *kernel*. Durante questa fase:
 * L'hardware della GPU prende il controllo e suddivide il lavoro su migliaia di thread.
-* Per massimizzare le prestazioni ed evitare continui e lenti accessi alla memoria globale, la GPU cerca di trattenere i dati all'interno del chip, sfruttando memorie ultra-veloci come i registri privati e la memoria condivisa (Shared Memory).
+* Per massimizzare le prestazioni ed evitare continui e lenti accessi alla memoria globale, è bene ottimizzare l'accesso ai dati all'interno del chip, sfruttando memorie ultra-veloci come i registri privati e la memoria condivisa (Shared Memory).
 * Il lancio del kernel è **asincrono**: il controllo ritorna immediatamente alla CPU, che può proseguire con altre operazioni oppure mettersi in attesa del completamento del kernel richiamando `cudaDeviceSynchronize()`.
 
 ### 3. Recupero dei risultati (Device to Host)
 Al termine dell'elaborazione, i dati risultanti risiedono ancora nella memoria del Device. Affinché il programma principale possa utilizzarli, salvarli o stamparli, la CPU deve inviare un nuovo comando di copia. Si utilizza nuovamente `cudaMemcpy`, ma con direzione inversa (`cudaMemcpyDeviceToHost`), per copiare i risultati dalla memoria della GPU a quella della CPU, transitando sempre sul bus PCIe.
 
 Come operazione finale di pulizia (Cleanup), la memoria precedentemente allocata sulla GPU deve essere liberata invocando la funzione `cudaFree()`.
+
+
+# Anatomia di una GPU e Gerarchia di Memoria
+
+A differenza di una CPU tradizionale, progettata per eseguire poche istruzioni complesse con bassissima latenza, una GPU è costruita con l'obiettivo di massimizzare il *throughput* parallelo. Per ottenere questo risultato, la GPU sacrifica complesse unità di controllo (come il *branch predictor* o l'esecuzione fuori ordine) in favore di un numero enorme di unità di calcolo.
+
+## Componenti Principali
+
+L'architettura hardware di una GPU (in particolare nel mondo NVIDIA/CUDA) si basa su una struttura altamente gerarchica:
+
+*   **Streaming Multiprocessor (SM):** È il cuore computazionale della GPU (spesso chiamato *Compute Unit* in terminologia OpenCL). Una GPU è composta da un array (una griglia) di numerosi SM.
+*   **Streaming Processor (SP) o CUDA Core:** All'interno di ogni singolo SM si trovano dozzine o centinaia di piccoli processori (ALU). Questi core eseguono materialmente i calcoli matematici.
+*   **Warp Scheduler e Unità di Controllo:** I core all'interno di un SM non sono totalmente indipendenti, ma raggruppano i thread in unità da 32 chiamate *warp*, condividendo la logica di *fetch* e *decode* delle istruzioni. 
+*   Ogni SM è inoltre dotato di veloci risorse fisiche condivise, tra cui un imponente **Register File** (banco dei registri) e memorie cache L1 e condivise.
+
+## I Tipi di Memoria (Gerarchia)
+
+Il modello di memoria di CUDA prevede spazi di memoria distinti, caratterizzati da diverse latenze, larghezze di banda e visibilità da parte dei thread. Procedendo dalla più veloce alla più lenta:
+
+1.  **Registri (Registers):** Costituiscono la memoria più veloce in assoluto (on-chip). Sono rigorosamente privati per ogni singolo thread e vengono usati per memorizzare le variabili locali ad accesso più frequente.
+2.  **Memoria Condivisa (Shared Memory):** È una memoria on-chip estremamente veloce (paragonabile alla cache L1) la cui allocazione e utilizzo devono essere esplicitamente gestiti dal programmatore nel codice. È visibile esclusivamente ai thread che appartengono allo stesso **blocco**, permettendo loro di cooperare e condividere risultati intermedi senza dover accedere alla memoria esterna.
+3.  **Memoria Locale (Local Memory):** Questa memoria è privata per il singolo thread, ma fisicamente risiede nell'enorme e lenta memoria esterna del *Device* (DRAM). Viene utilizzata automaticamente dal compilatore quando un thread esaurisce i registri a disposizione (fenomeno di *register spilling*) o per allocare array locali troppo grandi.
+4.  **Memoria Globale (Global Memory):** È lo spazio di memoria più capiente della GPU (misurabile in Gigabyte), accessibile in lettura e scrittura da *tutti* i thread di qualsiasi blocco, oltre che dall'Host (tramite bus PCIe). Tuttavia, è "off-chip", il che comporta latenze molto elevate (centinaia di cicli di clock). L'accesso a questa memoria dovrebbe sempre essere ottimizzato tramite accessi "coalescenti" per sfruttare la banda passante.
+5.  **Memoria Costante (Constant Memory) e Texture Memory:** Sono porzioni specifiche della lenta memoria globale che godono però di **cache hardware dedicate on-chip**. Sono accessibili in sola lettura da parte dei thread della GPU (possono essere scritte solo dall'Host). La memoria costante è ottimizzata per distribuire in un colpo solo lo stesso valore a tutto un *warp* di thread, mentre la Texture Memory è ottimizzata per sfruttare la località spaziale 2D, rivelandosi utile in specifici pattern di accesso.
+
 
