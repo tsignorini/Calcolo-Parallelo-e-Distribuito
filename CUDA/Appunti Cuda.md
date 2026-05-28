@@ -86,3 +86,27 @@ Il modello di memoria di CUDA prevede spazi di memoria distinti, caratterizzati 
 
 ![Immagine descrittiva dell'architettura di una GPU.](../immagini/gpu_architectures.png)
 
+# Il Modello di Programmazione CUDA: Griglie, Blocchi e Thread
+
+Per sfruttare l'enorme parallelismo delle GPU, CUDA richiede al programmatore di adottare una specifica astrazione gerarchica. Invece di scrivere un programma sequenziale, il programmatore deve pensare a come scomporre il dominio del problema in porzioni indipendenti e via via più piccole. 
+
+Questa astrazione si articola sui seguenti livelli:
+
+### 1. Il Problema Globale (La Griglia / Grid)
+Quando il programmatore lancia un *kernel* sulla GPU, crea un'entità chiamata **Grid** (Griglia). La griglia rappresenta l'intero problema computazionale da risolvere (ad esempio, l'elaborazione di un'intera immagine o la moltiplicazione di due grandi matrici). Una griglia può essere monodimensionale (1D), bidimensionale (2D) o tridimensionale (3D), a seconda della topologia dei dati da elaborare.
+
+### 2. Sottoproblemi Indipendenti (I Blocchi / Thread Blocks) La griglia è a sua volta suddivisa in numerosi Blocchi. Ogni blocco è un raggruppamento di thread che elabora una specifica e circoscritta porzione del problema globale (ad esempio, un tassello 16x16 pixel dell'immagine). La divisione in blocchi è il segreto della Scalabilità Automatica di CUDA: l'hardware è libero di eseguire questi blocchi in qualsiasi ordine, in parallelo o sequenzialmente
+. Se l'utente esegue il programma su una GPU economica con soli 2 Streaming Multiprocessor (SM), i blocchi verranno elaborati un po' alla volta, distribuiti sulle poche risorse disponibili; se usa una GPU di fascia alta con decine di SM, molti più blocchi verranno elaborati in contemporanea, riducendo drasticamente il tempo di esecuzione senza dover modificare una singola riga di codice
+. Proprio per questo il programmatore mira a scrivere un programma cosiddetto longevo: suddividendo il problema in moltissimi blocchi indipendenti, si assicura che man mano che saranno disponibili GPU future più potenti, lo stesso codice potrà scalare automaticamente ed essere eseguito in un minor tempo.
+
+### 2. Sottoproblemi Indipendenti (I Blocchi / Thread Blocks)
+La griglia è a sua volta suddivisa in numerosi **Blocchi**. Ogni blocco è un raggruppamento di thread che elabora una specifica e circoscritta porzione del problema globale (ad esempio, un tassello 16x16 pixel dell'immagine). 
+La divisione in blocchi è il segreto della **Scalabilità Automatica** di CUDA: l'hardware è libero di eseguire questi blocchi in qualsiasi ordine, in parallelo o sequenzialmente. Se l'utente esegue il programma su una GPU economica con soli 2 Streaming Multiprocessor (SM), i blocchi verranno elaborati un po' alla volta, con un massimo di due blocchi in contemporanea; se usa una GPU di fascia alta con decine di SM, molti più blocchi verranno elaborati in contemporanea, riducendo drasticamente il tempo di esecuzione senza dover modificare una singola riga di codice. Proprio per questo il programmatore mira a scrivere un programma cosidetto longevo, infatti si divide in moltissimi blocchi, cosicché man mano che saranno disponibili GPU più potenti, lo stesso codice potrà essere eseguito in un minor tempo.
+
+### 3. L'Unità Minima Logica (I Thread)
+Ogni blocco è composto da una matrice di **Thread**, che rappresentano l'unità minima logica di lavoro. Ciascun thread esegue la medesima sequenza di istruzioni (il *kernel*), ma applicata a un singolo elemento dei dati, calcolando il proprio indirizzo in memoria sfruttando le coordinate fornite dal sistema (`threadIdx` e `blockIdx`). Le dimensioni di un blocco sono decise dal programmatore, ma l'architettura impone un limite massimo invalicabile di 1024 thread per blocco. All'interno dello stesso blocco, i thread possono cooperare e scambiarsi dati velocemente tramite la memoria condivisa (Shared Memory).
+
+### 4. L'Esecuzione Fisica (I Warp)
+Mentre Griglia, Blocchi e Thread sono le astrazioni *logiche* usate dal programmatore per scrivere il codice, a livello *hardware* l'esecuzione avviene tramite un'ulteriore suddivisione: i **Warp**.
+Quando un blocco viene assegnato a un multiprocessore (SM), l'hardware raggruppa automaticamente i suoi thread in gruppi indivisibili di **32 thread**, chiamati appunto Warp. Tutti i 32 thread di un warp operano in rigoroso regime SIMT (Single-Instruction, Multiple-Thread): eseguono contemporaneamente la stessa identica istruzione ma su dati diversi. Questo permette di semplificare enormemente i circuiti di controllo della GPU, sacrificando però efficienza qualora i thread dello stesso warp debbano prendere percorsi condizionali diversi (fenomeno noto come *thread divergence*).
+
