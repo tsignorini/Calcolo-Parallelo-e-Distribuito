@@ -140,3 +140,41 @@ Se il fabbisogno di memoria del blocco supera le risorse fisiche dell'SM, andiam
 Per questo motivo, programmare in CUDA richiede un'estrema attenzione alla gestione della memoria locale. Il programmatore non può limitarsi a scrivere codice funzionante, ma deve adottare ogni accortezza possibile per **mantenere il singolo thread il più "leggero" possibile**. 
 
 Riducendo al minimo indispensabile le variabili locali definite nel codice e riutilizzando i registri, il programmatore si assicura che il fabbisogno totale del blocco non ecceda i limiti dell'SM. Solo attraverso questa meticolosa ottimizzazione possiamo raggiungere il nostro vero traguardo: garantire che il multiprocessore riesca a ospitare i nostri blocchi da 1024 thread interamente nelle sue memorie ultra-veloci, sfruttando fino all'ultima goccia la potenza di calcolo della GPU.
+
+
+# Funzioni Global e il Concetto di Kernel
+
+Nella programmazione CUDA, il codice che viene materialmente eseguito sulla GPU prende il nome di **kernel**. A differenza di una normale funzione C/C++ che viene elaborata una sola volta e in modo sequenziale, un kernel è progettato per essere eseguito simultaneamente in parallelo da decine di migliaia di thread indipendenti.
+
+Per definire un kernel e istruire il compilatore (`nvcc`) a trattarlo come tale, CUDA estende il linguaggio C/C++ introducendo un qualificatore di spazio di esecuzione specifico: **`__global__`**.
+
+### Il qualificatore `__global__`
+Aggiungere la parola chiave `__global__` prima della definizione di una funzione stabilisce un vero e proprio ponte tra la CPU e la GPU. Le caratteristiche fondamentali di una funzione `__global__` sono tre:
+
+1. **Esecuzione sul Device:** L'intero blocco di codice della funzione viene compilato nel formato binario della GPU ed eseguito fisicamente sui processori del *Device*.
+2. **Chiamata dall'Host:** La grande particolarità di questa funzione è che **l'invocazione avviene da parte della CPU (*Host*)**, tipicamente all'interno del programma principale (es. dal `main`). Questo rappresenta il momento esatto in cui l'Host cede il controllo dell'operazione e sposta l'esecuzione sul Device. 
+3. **Restituisce sempre `void`:** Poiché la funzione viene eseguita in parallelo da innumerevoli thread, non avrebbe senso farle restituire un singolo valore con un `return`. Per questo motivo, le funzioni `__global__` devono avere obbligatoriamente un tipo di ritorno `void`. I risultati dell'elaborazione vengono invece salvati scrivendoli in array o strutture allocate in precedenza sulla memoria della GPU, utilizzando i puntatori passati come argomenti.
+
+### Il lancio del Kernel (Kernel Launch)
+Essendo una funzione speciale, un kernel `__global__` non può essere chiamato con la normale sintassi del C/C++. Affinché la GPU sappia quanti thread attivare per svolgere il lavoro, il programmatore deve specificare la cosiddetta **configurazione di esecuzione**.
+
+Questa configurazione si esprime inserendo il numero di griglie e di blocchi tra **tre parentesi angolari `<<< ... >>>`**, posizionate subito dopo il nome della funzione e prima degli argomenti standard:
+
+```cpp
+// Definizione del kernel tramite qualificatore __global__
+__global__ void mio_kernel(int *dati_input, int *risultati) {
+    // Codice che ogni singolo thread eseguirà sulla GPU...
+}
+
+int main() {
+    // ... allocazione memoria e copia dati (Host to Device) ...
+
+    // Lancio del kernel: la chiamata parte dall'Host, l'esecuzione va sul Device
+    mio_kernel<<<dimGrid, dimBlock>>>(dati_input);
+
+    // ... recupero dei risultati (Device to Host) ...
+}
+```
+
+Un aspetto cruciale da ricordare quando si lancia una `__global__` è la sua **asincronia**. Non appena la CPU esegue l'istruzione di lancio (`<<<...>>>`), il controllo le viene restituito immediatamente. L'Host non aspetta che la GPU finisca i calcoli, ma passa istantaneamente all'istruzione successiva; se ha bisogno di attendere i risultati prima di procedere, dovrà invocare esplicitamente una barriera di sincronizzazione tramite il comando `cudaDeviceSynchronize()`.
+
