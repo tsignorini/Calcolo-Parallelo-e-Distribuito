@@ -121,3 +121,22 @@ Tuttavia, ogni singolo thread possiede un proprio program counter e un proprio s
 
 Poiché l'hardware del warp non è in grado di eseguire due istruzioni diverse nello stesso istante, la GPU è costretta a risolvere la divergenza **serializzando l'esecuzione**. Il multiprocessore eseguirà sequenzialmente ogni singolo ramo: mentre viene elaborato il percorso di una parte dei thread, i thread che non appartengono a quel ramo vengono momentaneamente **disabilitati e costretti all'attesa**. Questo comportamento fa sì che, per tutta la durata dell'istruzione divergente, una porzione delle unità di calcolo rimanga inattiva e non utilizzata, annullando di fatto il beneficio del parallelismo. Solo una volta terminata l'esecuzione di tutti i percorsi ramificati, i thread del warp si ricongiungono e riprendono a eseguire l'istruzione successiva in piena simultaneità.
 ![Immagine descrittiva della divergenza tra thread.](../immagini/warp_divergence.png)
+
+
+# L'Obiettivo del Programmatore: Ottimizzare l'Uso dei Registri
+
+Nella stesura di un programma CUDA, l'hardware ci mette a disposizione un parallelismo imponente, consentendoci di lanciare blocchi che possono contenere fino a un massimo di 1024 thread. Il nostro obiettivo primario come programmatori è proprio quello di **sfruttare appieno questa potenza, riuscendo a far girare tutti e 1024 i thread di un blocco in modo efficiente e simultaneo**. 
+
+Tuttavia, bisogna scontrarsi con una regola fondamentale dell'hardware CUDA: l'allocazione delle risorse per un blocco segue la logica del **"tutto o niente"**. Quando un blocco viene assegnato a uno Streaming Multiprocessor (SM), l'hardware deve riservare i veloci registri privati e la memoria condivisa per *tutti* i thread del blocco in un colpo solo. Il sistema non disattiverà mai alcun thread per cercare di "fare spazio" a un blocco troppo grande.
+
+### Il Rischio: Fallimento del Kernel e Register Spilling
+L'ostacolo principale a questo obiettivo si presenta quando scriviamo il codice (il *kernel*) in modo troppo complesso, definendo un numero eccessivo di variabili locali per il singolo thread. Se moltiplichiamo queste variabili per i 1024 thread del nostro blocco, potremmo superare rapidamente la disponibilità fisica dei registri sul multiprocessore.
+
+Se il fabbisogno di memoria del blocco supera le risorse fisiche dell'SM, andiamo incontro a due scenari che distruggono le prestazioni:
+1. **Fallimento del Kernel:** Se le risorse non sono sufficienti per ospitare nemmeno un singolo blocco per intero, l'esecuzione fallisce e il programma non viene lanciato.
+2. **Register Spilling:** Per evitare il crash, il compilatore tenta di minimizzare l'uso dei registri trasferendo (o "versando") in automatico le variabili in eccesso nella *Local Memory*. Sebbene il blocco riesca a girare, la Local Memory risiede fisicamente nella lentissima memoria globale esterna, e questo causa un crollo drastico della velocità di calcolo di tutti i nostri 1024 thread.
+
+### L'Accortezza del Programmatore
+Per questo motivo, programmare in CUDA richiede un'estrema attenzione alla gestione della memoria locale. Il programmatore non può limitarsi a scrivere codice funzionante, ma deve adottare ogni accortezza possibile per **mantenere il singolo thread il più "leggero" possibile**. 
+
+Riducendo al minimo indispensabile le variabili locali definite nel codice e riutilizzando i registri, il programmatore si assicura che il fabbisogno totale del blocco non ecceda i limiti dell'SM. Solo attraverso questa meticolosa ottimizzazione possiamo raggiungere il nostro vero traguardo: garantire che il multiprocessore riesca a ospitare i nostri blocchi da 1024 thread interamente nelle sue memorie ultra-veloci, sfruttando fino all'ultima goccia la potenza di calcolo della GPU.
