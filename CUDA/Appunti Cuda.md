@@ -142,39 +142,50 @@ Per questo motivo, programmare in CUDA richiede un'estrema attenzione alla gesti
 Riducendo al minimo indispensabile le variabili locali definite nel codice e riutilizzando i registri, il programmatore si assicura che il fabbisogno totale del blocco non ecceda i limiti dell'SM. Solo attraverso questa meticolosa ottimizzazione possiamo raggiungere il nostro vero traguardo: garantire che il multiprocessore riesca a ospitare i nostri blocchi da 1024 thread interamente nelle sue memorie ultra-veloci, sfruttando fino all'ultima goccia la potenza di calcolo della GPU.
 
 
-# Funzioni Global e il Concetto di Kernel
+
+# Funzioni Global, il Concetto di Kernel e la Gestione dei Dati
 
 Nella programmazione CUDA, il codice che viene materialmente eseguito sulla GPU prende il nome di **kernel**. A differenza di una normale funzione C/C++ che viene elaborata una sola volta e in modo sequenziale, un kernel è progettato per essere eseguito simultaneamente in parallelo da decine di migliaia di thread indipendenti.
 
 Per definire un kernel e istruire il compilatore (`nvcc`) a trattarlo come tale, CUDA estende il linguaggio C/C++ introducendo un qualificatore di spazio di esecuzione specifico: **`__global__`**.
 
 ### Il qualificatore `__global__`
-Aggiungere la parola chiave `__global__` prima della definizione di una funzione stabilisce un vero e proprio ponte tra la CPU e la GPU. Le caratteristiche fondamentali di una funzione `__global__` sono tre:
+Aggiungere la parola chiave `__global__` prima della definizione di una funzione stabilisce le seguenti regole architetturali:
 
-1. **Esecuzione sul Device:** L'intero blocco di codice della funzione viene compilato nel formato binario della GPU ed eseguito fisicamente sui processori del *Device*.
-2. **Chiamata dall'Host:** La grande particolarità di questa funzione è che **l'invocazione avviene da parte della CPU (*Host*)**, tipicamente all'interno del programma principale (es. dal `main`). Questo rappresenta il momento esatto in cui l'Host cede il controllo dell'operazione e sposta l'esecuzione sul Device. 
-3. **Restituisce sempre `void`:** Poiché la funzione viene eseguita in parallelo da innumerevoli thread, non avrebbe senso farle restituire un singolo valore con un `return`. Per questo motivo, le funzioni `__global__` devono avere obbligatoriamente un tipo di ritorno `void`. I risultati dell'elaborazione vengono invece salvati scrivendoli in array o strutture allocate in precedenza sulla memoria della GPU, utilizzando i puntatori passati come argomenti.
+1. **Esecuzione e Chiamata:** L'intero blocco di codice della funzione viene compilato ed eseguito fisicamente sui processori del *Device* (GPU), ma **l'invocazione avviene da parte della CPU (*Host*)**. Questo rappresenta il momento esatto in cui l'Host cede il controllo dell'operazione e sposta il carico computazionale sul Device.
+2. **Perché restituisce sempre `void`?:** Le funzioni `__global__` devono avere obbligatoriamente un tipo di ritorno `void`. Questo limite deriva da due motivi fondamentali strettamente legati all'architettura hardware e alla memoria:
+   * **Parallelismo massivo:** Il kernel viene eseguito in parallelo da innumerevoli thread. Se la funzione utilizzasse un comando `return`, la CPU riceverebbe migliaia di valori di ritorno simultanei, rendendo impossibile gestire o capire a quale specifico thread appartenga un dato risultato.
+   * **Spazi di memoria separati:** Host (CPU) e Device (GPU) possiedono RAM fisicamente distinte. Un semplice `return` non avrebbe modo di trasferire automaticamente un dato dalla VRAM della scheda video alla RAM di sistema.
+
+### Il meccanismo dei Puntatori e dell'Allocazione
+Per ovviare all'impossibilità di usare il `return`, i risultati dell'elaborazione vengono salvati scrivendoli direttamente in aree di memoria della GPU. Il flusso di lavoro che il programmatore deve orchestrare è il seguente:
+
+* **Allocazione:** Prima di lanciare il kernel, l'Host utilizza il comando `cudaMalloc()` per riservare lo spazio necessario ad ospitare i risultati direttamente nella memoria della scheda video.
+* **Passaggio dei riferimenti:** L'Host lancia la funzione `__global__` passandole come argomenti i puntatori a quest'area di memoria pre-allocata sul Device. In questo modo, le migliaia di thread sanno esattamente in quale area della GPU scrivere i propri risultati finali.
+* **Recupero:** Terminata l'elaborazione, la funzione `__global__` si chiude senza restituire nulla (`void`). I dati risiedono ora nell'area puntata della GPU. La CPU dovrà quindi invocare esplicitamente un comando `cudaMemcpy()` (con direzione `cudaMemcpyDeviceToHost`) per ricopiare i risultati dalla scheda video alla propria RAM, rendendoli fruibili.
 
 ### Il lancio del Kernel (Kernel Launch)
-Essendo una funzione speciale, un kernel `__global__` non può essere chiamato con la normale sintassi del C/C++. Affinché la GPU sappia quanti thread attivare per svolgere il lavoro, il programmatore deve specificare la cosiddetta **configurazione di esecuzione**.
+Essendo una funzione speciale, un kernel `__global__` non può essere chiamato con la normale sintassi del C/C++. Affinché la GPU sappia quanti thread attivare, il programmatore deve specificare la **configurazione di esecuzione**.
 
-Questa configurazione si esprime inserendo il numero di griglie e di blocchi tra **tre parentesi angolari `<<< ... >>>`**, posizionate subito dopo il nome della funzione e prima degli argomenti standard:
+Questa configurazione si esprime inserendo il numero di griglie e di blocchi tra **tre parentesi angolari `<<< ... >>>`**, posizionate subito dopo il nome della funzione:
 
 ```cpp
-// Definizione del kernel tramite qualificatore __global__
-__global__ void mio_kernel(int *dati_input, int *risultati) {
-    // Codice che ogni singolo thread eseguirà sulla GPU...
+// Definizione del kernel (ritorna void, usa puntatori per i risultati)
+__global__ void mio_kernel(int *dati_input_device, int *risultati_device) {
+    // Ogni thread calcola il proprio indice e scrive il risultato 
+    // direttamente nell'area puntata da 'risultati_device'
 }
 
 int main() {
-    // ... allocazione memoria e copia dati (Host to Device) ...
+    // ... cudaMalloc e cudaMemcpy (Host to Device) per preparare i dati ...
 
     // Lancio del kernel: la chiamata parte dall'Host, l'esecuzione va sul Device
-    mio_kernel<<<dimGrid, dimBlock>>>(dati_input); // dimGrid = Numero di Blocchi, mentre dimBlock = Numero di Thread per Blocco
+    mio_kernel<<<dimGrid, dimBlock>>>(dati_input_device); //dimGrid = Numero di Blocchi / dimBlock = Numero di Thread per Blocco
 
-    // ... recupero dei risultati (Device to Host) ...
+    // ... recupero dei risultati con cudaMemcpy (Device to Host) ...
 }
 ```
 
-Un aspetto cruciale da ricordare quando si lancia una `__global__` è la sua **asincronia**. Non appena la CPU esegue l'istruzione di lancio (`<<<...>>>`), il controllo le viene restituito immediatamente. L'Host non aspetta che la GPU finisca i calcoli, ma passa istantaneamente all'istruzione successiva; se ha bisogno di attendere i risultati prima di procedere, dovrà invocare esplicitamente una barriera di sincronizzazione tramite il comando `cudaDeviceSynchronize()`.
+Un aspetto cruciale da ricordare quando si lancia una `__global__` è la sua **asincronia**. Non appena la CPU esegue l'istruzione di lancio `<<<...>>>`, il controllo le viene restituito immediatamente, senza aspettare che la GPU finisca i calcoli. Se l'Host ha bisogno di attendere che il kernel termini il suo lavoro prima di procedere, dovrà invocare una barriera di sincronizzazione esplicita tramite il comando `cudaDeviceSynchronize()` (oppure attendere l'esecuzione di un `cudaMemcpy` bloccante, che implicitamente aspetta la fine delle operazioni precedenti).
+
 
