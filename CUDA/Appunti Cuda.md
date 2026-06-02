@@ -265,3 +265,39 @@ int main(void) {
 2. **Il Lancio del Kernel e l'Asincronia:** L'istruzione `add<<<blocksPerGrid, THREADS_PER_BLOCK>>>(...)` dice alla GPU di attivare una griglia composta da blocchi, ciascuno contenente 256 thread. Poiché potremmo avere vettori di dimensioni arbitrarie che non sono multipli esatti della dimensione del blocco, la formula `(N + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK` assicura di creare abbastanza blocchi per coprire tutti gli elementi. Infatti se `N` è multiplo di `THREADS_PER_BLOCK`, la formula restituisce il risultato `N/THREADS_PER_BLOCK`, in caso contrario è come se prendesse la parte intera superiore, cioè alloca un blocco di `THREADS_PER_BLOCK` thread, ma alcuni di questi non verranno utilizzati.
 3. **Astrazione e Indicizzazione nel Kernel:** Poiché decine di migliaia di thread eseguiranno la stessa funzione `add`, l'unico modo che ha un thread per sapere su quale elemento dell'array deve lavorare è calcolare la propria coordinata spaziale. L'istruzione **`int index = threadIdx.x + blockIdx.x * blockDim.x;`** permette a ogni thread di trovare il proprio posto nel problema globale. L'istruzione `if (index < n)` protegge la memoria, assicurandosi che i thread in eccesso creati nell'ultimo blocco non cerchino di scrivere fuori dai limiti dell'array.
 
+
+# La Gerarchia di Memoria della GPU e il Limite delle Risorse
+
+Le moderne GPU possiedono una gerarchia di memoria complessa, essenziale per gestire l'enorme mole di dati elaborata in parallelo. A differenza delle CPU, che si affidano a grandi cache gestite dall'hardware per ridurre la latenza, le GPU offrono diversi spazi di memoria, molti dei quali devono essere gestiti esplicitamente dal programmatore per ottenere le massime prestazioni.
+
+Ecco i tipi di memoria a disposizione di un thread CUDA:
+
+*   **Registri (Registers):** È la memoria più veloce in assoluto (on-chip), con un tempo di accesso di 1 solo ciclo di clock. I registri sono rigorosamente privati per ogni singolo thread e contengono le variabili locali ad accesso frequente. Le GPU dispongono di decine di migliaia di registri per ogni Streaming Multiprocessor (SM), ripartiti tra i thread attivi.
+*   **Memoria Condivisa (Shared Memory):** È una memoria on-chip estremamente veloce (1-32 cicli di clock) allocata per blocco. Tutti i thread dello stesso blocco possono leggere e scrivere in questo spazio, rendendolo ideale per la cooperazione e la sincronizzazione. Funge di fatto come una cache gestita dall'utente (*user-managed cache*), permettendo di caricare dati dalla memoria globale, elaborarli e riscriverli, evitando continui accessi lenti. La sua quantità è però limitata (es. da 16 KB a 48 KB per SM a seconda dell'architettura).
+*   **Memoria Globale (Global Memory):** È lo spazio di memoria più capiente (fino a svariati Gigabyte, risiede nella DRAM off-chip) ma anche il più lento, con latenze che possono raggiungere centinaia di cicli di clock. È visibile a tutti i thread dell'applicazione e all'Host (CPU). Per massimizzare la banda passante, gli accessi a questa memoria devono essere **coalescenti**: i thread di un *warp* dovrebbero accedere ad indirizzi di memoria contigui, in modo che l'hardware raggruppi le richieste in un'unica transazione da 32, 64 o 128 byte.
+*   **Memoria Costante (Constant Memory):** È una porzione della memoria globale, accessibile in sola lettura dal device (e in scrittura dall'Host). Pur essendo off-chip, gode di una cache dedicata ad altissima velocità. È ottimizzata per fare *broadcasting*: se tutti i thread di un warp leggono lo stesso identico indirizzo costante, il dato viene fornito in un singolo ciclo.
+*   **Memoria per Texture e Superfici (Texture/Surface Memory):** Come la memoria costante, risiede off-chip ma possiede una cache dedicata. È ottimizzata specificamente per la **località spaziale bidimensionale (2D) e tridimensionale (3D)**: i thread che accedono a coordinate geometricamente vicine otterranno prestazioni eccellenti (molto usata nella grafica e nell'elaborazione di immagini).
+*   **Memoria Locale (Local Memory):** Nonostante il nome possa trarre in inganno, questa memoria **risiede fisicamente nella lentissima memoria globale off-chip**. Viene utilizzata automaticamente dal compilatore come spazio privato per il singolo thread quando le variabili allocate sono troppo grandi per stare nei registri (es. array indicizzati con variabili) o quando i registri fisici dell'SM si esauriscono. Questo fenomeno prende il nome di **register spilling**.
+
+
+![Immagine descrittiva della memoria CUDA.](../immagini/cuda_memory.png)
+---
+
+### Il compromesso tra Memoria Allocata, Dimensioni del Blocco e Prestazioni
+
+Come programmatori CUDA, il nostro obiettivo è massimizzare l'**Occupancy**, ovvero il numero di *warp* attivi contemporaneamente sull'SM. La GPU ha un disperato bisogno di mantenere in esecuzione decine di warp simultaneamente per poter utilizzare la tecnica dell'**occultamento della latenza** (*latency hiding*): mentre un warp aspetta centinaia di cicli di clock per ricevere un dato dalla memoria globale, l'hardware esegue istantaneamente i calcoli di un altro warp pronto.
+
+Tuttavia, il numero di blocchi e di warp che possono risiedere fisicamente sull'SM dipende dalla quantità di **registri e di memoria condivisa** richiesti dal singolo kernel.
+
+**Cosa succede quando si alloca troppa memoria per singolo thread?**
+Se nel nostro codice definiamo un kernel molto complesso, ricco di variabili locali o pesanti array per ogni thread, la richiesta totale di registri o di memoria privata per un intero blocco (es. un blocco da 1024 thread) potrebbe superare le disponibilità fisiche dell'SM. L'hardware non ha modo di dividere a metà un blocco: l'allocazione avviene per tutto il blocco simultaneamente.
+
+In questa situazione critica, si verificano i seguenti problemi prestazionali a catena:
+
+1.  **Impossibilità di lanciare il Kernel o Spilling:** Se il blocco richiede troppe risorse, il kernel fallirà semplicemente il lancio. Per evitare il crash, il compilatore ripiegherà sul *register spilling*, scaricando le variabili in eccesso nella lentissima memoria locale (DRAM esterna), affossando istantaneamente le prestazioni.
+2.  **Necessità di diminuire i Thread per Blocco:** Per ovviare al problema (quando non è possibile semplificare il codice), **il programmatore è costretto a riconfigurare il lancio del kernel, diminuendo il numero di thread assegnati a ciascun blocco** (ad esempio, passando da 1024 a 256 o 128 thread per blocco) per far rientrare il consumo totale di memoria entro i limiti fisici dell'SM.
+3.  **Crollo dell'Occupancy e della Potenza di Calcolo:** Configurando blocchi con pochi thread, si abbassa drasticamente l'occupancy dell'SM. Avendo a disposizione un numero insufficiente di *warp* concorrenti, lo scheduler della GPU non avrà abbastanza thread da far lavorare mentre gli altri sono in attesa dei dati dalla memoria. 
+
+Di conseguenza, a causa dell'eccessiva allocazione di memoria per singolo thread, **la GPU rimarrà in idle (inattiva) per lunghi periodi, non sfruttando a pieno i suoi core computazionali e vanificando l'enorme potenza di calcolo parallelo per cui è stata progettata**.
+
+
