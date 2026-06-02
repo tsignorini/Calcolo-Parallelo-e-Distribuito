@@ -188,4 +188,80 @@ int main() {
 
 Un aspetto cruciale da ricordare quando si lancia una `__global__` è la sua **asincronia**. Non appena la CPU esegue l'istruzione di lancio `<<<...>>>`, il controllo le viene restituito immediatamente, senza aspettare che la GPU finisca i calcoli. Se l'Host ha bisogno di attendere che il kernel termini il suo lavoro prima di procedere, dovrà invocare una barriera di sincronizzazione esplicita tramite il comando `cudaDeviceSynchronize()` (oppure attendere l'esecuzione di un `cudaMemcpy` bloccante, che implicitamente aspetta la fine delle operazioni precedenti).
 
+Ecco il codice completo per l'esempio classico della **somma vettoriale** (somma di due array elemento per elemento), che mette in pratica tutti i concetti che abbiamo visto finora: la definizione del kernel `__global__`, l'allocazione della memoria sulla GPU, il trasferimento dei dati e il lancio dell'esecuzione parallela. 
+
+```cpp
+#include <stdio.h>
+#include <stdlib.h>
+
+// Definiamo la dimensione del problema e il numero di thread per blocco
+#define N 512
+#define THREADS_PER_BLOCK 256
+
+// ---------------------------------------------------------
+// 1. IL KERNEL (Eseguito sulla GPU, chiamato dalla CPU)
+// ---------------------------------------------------------
+__global__ void add(int *a, int *b, int *c, int n) {
+    // Ogni thread calcola il proprio indice globale univoco
+    int index = threadIdx.x + blockIdx.x * blockDim.x;
+
+    // Controllo per evitare accessi oltre la fine dell'array
+    if (index < n) {
+        c[index] = a[index] + b[index];
+    }
+}
+
+// ---------------------------------------------------------
+// 2. IL PROGRAMMA PRINCIPALE (Eseguito sulla CPU)
+// ---------------------------------------------------------
+int main(void) {
+    int *a, *b, *c;           // Puntatori per la memoria dell'Host (CPU)
+    int *d_a, *d_b, *d_c;     // Puntatori per la memoria del Device (GPU)
+    int size = N * sizeof(int);
+
+    // Allocazione dello spazio per le copie sull'Host e inizializzazione
+    a = (int *)malloc(size);
+    b = (int *)malloc(size);
+    c = (int *)malloc(size);
+    for(int i = 0; i < N; i++) { 
+        a[i] = 1; 
+        b[i] = 2; 
+    }
+
+    // FASE 1: Allocazione della memoria sulla GPU
+    cudaMalloc((void **)&d_a, size);
+    cudaMalloc((void **)&d_b, size);
+    cudaMalloc((void **)&d_c, size);
+
+    // Trasferimento dei dati in ingresso (Host to Device)
+    cudaMemcpy(d_a, a, size, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_b, b, size, cudaMemcpyHostToDevice);
+
+    // FASE 2: Configurazione ed Esecuzione del Kernel
+    // Calcoliamo quanti blocchi ci servono per coprire tutti gli N elementi
+    int blocksPerGrid = (N + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK;
+
+    // Lancio del kernel in modo asincrono
+    add<<<blocksPerGrid, THREADS_PER_BLOCK>>>(d_a, d_b, d_c, N);
+
+    // FASE 3: Recupero dei risultati (Device to Host)
+    cudaMemcpy(c, d_c, size, cudaMemcpyDeviceToHost);
+
+    // Operazione finale: Pulizia della memoria sulla GPU e sulla CPU
+    cudaFree(d_a); 
+    cudaFree(d_b); 
+    cudaFree(d_c);
+    free(a); 
+    free(b); 
+    free(c);
+
+    return 0;
+}
+```
+
+### Analisi dei passaggi chiave:
+
+1. **Gestione della Memoria (Fasi 1 e 3):** Come puoi notare nel `main`, l'Host non può passare i propri puntatori `a`, `b` e `c` alla GPU. Utilizza invece **`cudaMalloc`** per creare aree di memoria fisicamente separate sul Device (`d_a`, `d_b`, `d_c`). I dati vengono spostati con **`cudaMemcpy`**, specificando se il viaggio è verso la GPU (`cudaMemcpyHostToDevice`) o verso la CPU per recuperare i risultati (`cudaMemcpyDeviceToHost`).
+2. **Il Lancio del Kernel e l'Asincronia:** L'istruzione `add<<<blocksPerGrid, THREADS_PER_BLOCK>>>(...)` dice alla GPU di attivare una griglia composta da blocchi, ciascuno contenente 256 thread. Poiché potremmo avere vettori di dimensioni arbitrarie che non sono multipli esatti della dimensione del blocco, la formula `(N + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK` assicura di creare abbastanza blocchi per coprire tutti gli elementi. Infatti se `N` è multiplo di `THREADS_PER_BLOCK`, la formula restituisce il risultato `N/THREADS_PER_BLOCK`, in caso contrario è come se prendesse la parte intera superiore, cioè alloca un blocco di `THREADS_PER_BLOCK` thread, ma alcuni di questi non verranno utilizzati.
+3. **Astrazione e Indicizzazione nel Kernel:** Poiché decine di migliaia di thread eseguiranno la stessa funzione `add`, l'unico modo che ha un thread per sapere su quale elemento dell'array deve lavorare è calcolare la propria coordinata spaziale. L'istruzione **`int index = threadIdx.x + blockIdx.x * blockDim.x;`** permette a ogni thread di trovare il proprio posto nel problema globale. L'istruzione `if (index < n)` protegge la memoria, assicurandosi che i thread in eccesso creati nell'ultimo blocco non cerchino di scrivere fuori dai limiti dell'array.
 
