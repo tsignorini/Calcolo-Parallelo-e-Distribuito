@@ -391,3 +391,37 @@ tend = hpc_gettime();    // 4. Ferma il cronometro
 printf("Tempo trascorso: %f secondi\n", tend - tstart);
 ```
 
+
+# Il Qualificatore `__device__` e l'Inlining delle Funzioni
+
+Mentre il qualificatore `__global__` serve a definire il *kernel* principale (chiamato dall'Host ed eseguito sul Device), un buon design del software richiede spesso la suddivisione del codice in sottomoduli. Per definire funzioni di supporto interne alla GPU, CUDA fornisce il qualificatore **`__device__`**.
+
+### Caratteristiche delle funzioni `__device__`
+Anteporre la parola chiave `__device__` alla definizione di una funzione indica al compilatore che essa:
+1. **Viene eseguita esclusivamente sui processori della GPU** (Device).
+2. **Può essere chiamata solo da un'altra funzione già in esecuzione sul Device** (ovvero da un kernel `__global__` o da un'altra funzione `__device__`).
+3. **Può restituire un valore**: a differenza dei kernel (che sono obbligati a ritornare `void`), le funzioni `__device__` possono restituire regolarmente valori scalari o strutturati (es. `int`, `float`), permettendo di scrivere funzioni matematiche o di utilità nel modo a cui i programmatori C/C++ sono abituati.
+
+È importante ricordare che i qualificatori `__global__` e `__device__` non possono mai essere applicati contemporaneamente alla stessa funzione.
+
+### L'assenza di Stack e i Vantaggi dell'Inlining
+Nelle architetture CPU classiche, l'invocazione di una funzione ha un costo prestazionale (*overhead*): il sistema deve salvare lo stato di esecuzione, saltare all'indirizzo di memoria della funzione, allocare le variabili locali su uno *stack* (una speciale struttura a pila), eseguire i calcoli e saltare nuovamente indietro. 
+
+Storicamente le GPU mal digeriscono l'uso dello *stack* per decine di migliaia di thread eseguiti in contemporanea. Per risolvere questo limite, di base **il compilatore CUDA compie un'operazione chiamata "inlining"** per le funzioni `__device__`. 
+
+L'inlining è un'ottimizzazione per cui il compilatore copia letteralmente l'intero blocco di istruzioni della funzione e lo "incolla" al posto della singola riga in cui viene chiamata all'interno del kernel. Questo garantisce prestazioni massime e zero overhead, poiché la GPU esegue le istruzioni linearmente senza effettuare costosi salti di contesto.
+
+### Gli Svantaggi: Esplosione del Codice e Pressione sui Registri
+Tuttavia, l'inlining non è la panacea di tutti i mali. Soprattutto per funzioni molto complesse o richiamate innumerevoli volte in rami di codice diversi, questo meccanismo di "copia e incolla" continuo presenta svantaggi critici:
+
+1. **Esplosione della lunghezza del codice (Code Bloat):** Il file binario generato cresce drasticamente a livello di dimensioni, e aumentare a dismisura il numero di istruzioni totali da far digerire all'hardware va contro le pratiche di ottimizzazione del compilatore [3].
+2. **Pressione sui Registri:** Un'istruzione espansa in linea "fonde" le proprie variabili locali con quelle del kernel chiamante. Se la funzione complessa richiede molti registri, il fabbisogno totale del kernel si impenna bruscamente. Come abbiamo visto, l'esaurimento dei registri disponibili abbassa drasticamente l'Occupancy del multiprocessore o, peggio, forza il sistema a ricorrere al disastroso *register spilling*.
+
+### I Qualificatori per il controllo dell'Inlining
+Proprio per bilanciare questi compromessi, CUDA offre ai programmatori dei qualificatori specifici per influenzare le euristiche del compilatore:
+* **`__forceinline__`**: forza il compilatore a effettuare l'espansione del codice a ogni costo [2].
+* **`__noinline__`**: fornisce un suggerimento (*hint*) al compilatore chiedendo di **non** espandere la funzione se possibile [2]. È lo strumento perfetto da usare quando una funzione è troppo complessa e causerebbe un'esplosione del codice, preferendo pagare il piccolo costo della chiamata a funzione pur di salvare i registri e mantenere alta l'Occupancy. 
+
+*(Nota: i qualificatori `__noinline__` e `__forceinline__` non possono ovviamente essere usati insieme sulla stessa funzione)*.
+
+
