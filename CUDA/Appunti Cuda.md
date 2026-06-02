@@ -485,3 +485,95 @@ Per consolidare quanto visto finora, ecco un rapido schema riassuntivo delle reg
 | **`__global__`** *(Kernel)* | Device (GPU) | Host | Solo ed esclusivamente `void` |
 | **`__host__ __device__`** | Host & Device | Host & Device | Qualsiasi tipo C/C++ |
 
+
+
+# Gestione delle Variabili Statiche con `cudaMemcpyToSymbol` e `cudaMemcpyFromSymbol`
+
+Quando si applica il qualificatore **`__device__`** a variabili globali, queste vengono allocate staticamente sulla memoria della GPU. Per copiare i dati da e verso queste specifiche variabili, **è obbligatorio utilizzare `cudaMemcpyToSymbol()` e `cudaMemcpyFromSymbol()`** al posto della classica funzione `cudaMemcpy`. 
+
+Ecco un esempio pratico basato sulle fonti che mostra come trasferire i dati tra un array sulla CPU (Host) e un array statico sulla GPU (Device):
+
+```cpp
+#define BLKDIM 1024
+
+// Allocazione statica di un array sul Device (variabile globale)
+__device__ float d_buf[BLKDIM];
+
+int main( void ) {
+    float buf[BLKDIM];
+    
+    // ... (inizializzazione dei dati in 'buf' sull'Host) ...
+
+    // Copia i dati dall'Host (buf) al simbolo sul Device (d_buf)
+    cudaMemcpyToSymbol(d_buf, buf, BLKDIM * sizeof(float));
+    
+    // ... (esecuzione del kernel) ...
+
+    // Recupera i dati dal simbolo sul Device (d_buf) all'Host (buf)
+    cudaMemcpyFromSymbol(buf, d_buf, BLKDIM * sizeof(float));
+    
+    return 0;
+}
+```
+
+
+# Gestione e Segnalazione degli Errori in CUDA
+
+Quando si sviluppa in CUDA, il debug può risultare complesso a causa della natura asincrona delle esecuzioni sulla GPU. Fortunatamente, CUDA fornisce un meccanismo integrato per tracciare cosa va storto, basato sul tipo di ritorno delle sue funzioni.
+
+### Il meccanismo nativo di CUDA
+Quasi tutte le chiamate alle API di CUDA (come `cudaMalloc`, `cudaMemcpy`, ecc.) restituiscono un valore di tipo `cudaError_t`. Questo codice di errore può indicare:
+1. Un errore verificatosi **nella chiamata API stessa** (es. parametri non validi).
+2. Un errore derivante da una **precedente operazione asincrona** (ad esempio, un kernel lanciato in precedenza che ha causato un *segmentation fault* sulla GPU).
+
+Se l'operazione va a buon fine, la funzione restituisce la costante `cudaSuccess`.
+
+Per recuperare e tradurre l'ultimo errore verificatosi, CUDA mette a disposizione due funzioni fondamentali:
+*   `cudaGetLastError(void)`: restituisce il codice dell'ultimo errore registrato dal runtime di CUDA.
+*   `cudaGetErrorString(cudaError_t)`: converte il codice di errore in una stringa di testo leggibile dall'umano.
+
+Un tipico controllo manuale degli errori si presenta così:
+```cpp
+cudaError_t err = cudaGetLastError();
+if (err != cudaSuccess) {
+    printf("Errore CUDA: %s\n", cudaGetErrorString(err));
+}
+```
+
+### L'utilità delle macro nella libreria `hpc.h`
+Poiché scrivere il blocco `if` mostrato sopra dopo **ogni singola** operazione di memoria o configurazione renderebbe il codice sorgente estremamente lungo e illeggibile, è buona norma affidarsi a macro di supporto. Esistono delle macro molto utili definite nell'header `hpc.h` (e implementate in `hpc.c`).
+
+Queste macro nascondono il codice di controllo, mantenendo il file sorgente pulito. Le due macro principali da utilizzare sono:
+
+1. **`cudaSafeCall(Exp)`**: 
+   Si usa per "avvolgere" qualsiasi funzione API di CUDA che restituisca un `cudaError_t` (come `cudaMalloc` o `cudaMemcpy`), in questo caso indicata con **Exp**. Questa macro esegue l'istruzione al suo interno e ne verifica automaticamente lo stato di ritorno; se rileva un errore, stampa il messaggio e blocca l'esecuzione del programma in modo controllato.
+
+2. **`cudaCheckError()`**: 
+   Come abbiamo visto, i kernel vengono lanciati con il qualificatore `__global__` e **restituiscono sempre `void`**, quindi non possiamo racchiuderli in una `cudaSafeCall`. Poiché il lancio del kernel è asincrono, eventuali errori di esecuzione si manifesterebbero in ritardo. La macro `cudaCheckError()` è pensata per essere inserita **subito dopo la chiamata di un kernel**: essa invoca implicitamente una `cudaDeviceSynchronize()` (costringendo la CPU ad aspettare la fine dei calcoli della GPU) e poi controlla se il kernel appena concluso ha generato errori.
+
+### Esempio di codice ottimizzato con `hpc.h`
+Utilizzando queste macro, la gestione delle memorie e il lancio del kernel diventano sicuri senza appesantire la lettura del codice:
+
+```cpp
+#include "hpc.h"
+
+int main() {
+    // ... allocazioni host ...
+
+    // Uso cudaSafeCall per le normali operazioni API
+    cudaSafeCall( cudaMemcpy(d_a, h_a, size, cudaMemcpyHostToDevice) );
+    
+    // Lancio asincrono del kernel (non posso usare cudaSafeCall qui)
+    my_kernel<<< 1, 1 >>>(d_a); 
+    
+    // Sincronizzo e controllo immediatamente eventuali errori del kernel
+    cudaCheckError(); 
+    
+    // Recupero sicuro dei risultati
+    cudaSafeCall( cudaMemcpy(h_a, d_a, size, cudaMemcpyDeviceToHost) );
+
+    return 0;
+}
+```
+L'utilizzo di queste funzioni è caldamente consigliato: individuare tempestivamente l'esatta riga di codice che ha causato un fallimento sulla GPU fa risparmiare ore di debugging.
+
