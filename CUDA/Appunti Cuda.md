@@ -170,7 +170,7 @@ int main() {
     // ... allocazione memoria e copia dati (Host to Device) ...
 
     // Lancio del kernel: la chiamata parte dall'Host, l'esecuzione va sul Device
-    mio_kernel<<<dimGrid, dimBlock>>>(dati_input);
+    mio_kernel<<<dimGrid, dimBlock>>>(dati_input); // dimGrid = Numero di Blocchi, mentre dimBlock = Numero di Thread per Blocco
 
     // ... recupero dei risultati (Device to Host) ...
 }
