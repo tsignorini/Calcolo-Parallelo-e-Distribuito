@@ -404,7 +404,7 @@ Anteporre la parola chiave `__device__` alla definizione di una funzione indica 
 
 È importante ricordare che i qualificatori `__global__` e `__device__` non possono mai essere applicati contemporaneamente alla stessa funzione.
 
-Di seguito è riportato un classico esempio di utilizzo del qualificatore `__device__`. Creeremo una piccola funzione di supporto per calcolare il massimo tra due numeri in virgola mobile (`cuda_fmaxf`) e la richiameremo all'interno del nostro kernel principale [1].
+Di seguito è riportato un classico esempio di utilizzo del qualificatore `__device__`. Creeremo una piccola funzione di supporto per calcolare il massimo tra due numeri in virgola mobile (`cuda_fmaxf`) e la richiameremo all'interno del nostro kernel principale.
 
 ```cpp
 // 1. Funzione ausiliaria: eseguita SOLO sulla GPU e chiamata SOLO dalla GPU
