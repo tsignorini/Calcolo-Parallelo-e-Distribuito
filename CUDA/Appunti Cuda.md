@@ -448,4 +448,40 @@ Proprio per bilanciare questi compromessi, CUDA offre ai programmatori dei quali
 
 *(Nota: i qualificatori `__noinline__` e `__forceinline__` non possono ovviamente essere usati insieme sulla stessa funzione)*.
 
+# Il Qualificatore `__host__` e la Doppia Compilazione
+
+A completamento del quadro sui qualificatori di spazio di esecuzione di CUDA, troviamo il qualificatore **`__host__`**. Come suggerisce il nome, questo qualificatore indica al compilatore che la funzione:
+1. **Viene eseguita esclusivamente sulla CPU** (Host).
+2. **Può essere chiamata solo dall'Host** (quindi dal `main` o da un'altra funzione della CPU).
+
+Di fatto, `__host__` rappresenta il comportamento predefinito nei programmi CUDA: se definisci una normale funzione C/C++ all'interno del tuo file sorgente `.cu` senza specificare né `__global__` né `__device__`, il compilatore la tratterà implicitamente come una funzione `__host__`. Va inoltre ricordato che il qualificatore `__host__` non può mai essere usato in combinazione con `__global__`.
+
+### La potenza di `__host__ __device__`
+Se il comportamento di `__host__` è quello di default, perché dovremmo mai scriverlo esplicitamente nel codice? La vera utilità di questo qualificatore emerge quando viene **combinato con il qualificatore `__device__`** sulla stessa funzione.
+
+Se dichiariamo una funzione anteponendo entrambi i qualificatori, stiamo istruendo il compilatore (`nvcc`) a **generare automaticamente due versioni distinte dello stesso codice**: una compilata in linguaggio macchina per la CPU e una compilata per la GPU.
+
+Questo approccio è estremamente vantaggioso per il riutilizzo del codice e la modularità. Immagina di aver scritto una funzione matematica di base o un semplice algoritmo di utilità di cui hai bisogno sia nel programma principale che all'interno del tuo kernel. Invece di dover duplicare il codice scrivendone una copia per il *Device* e una per l'*Host*, ti basta dichiararla una volta sola:
+
+```cpp
+// Il compilatore creerà due versioni di questa funzione: 
+// una chiamabile ed eseguibile dalla CPU, e una dalla GPU.
+__host__ __device__ float my_fmaxf(float a, float b) {
+    return (a > b ? a : b); 
+}
+```
+
+Inoltre, qualora ci fosse bisogno di eseguire un'operazione specifica o leggermente diversa a seconda del processore su cui la funzione sta materialmente girando (CPU o GPU), CUDA mette a disposizione la macro `__CUDA_ARCH__` che permette al programmatore di differenziare i due percorsi logici all'interno della stessa funzione.
+
+---
+
+### Tabella Riassuntiva dei Qualificatori di Funzione
+Per consolidare quanto visto finora, ecco un rapido schema riassuntivo delle regole di esecuzione e chiamata per i qualificatori forniti da CUDA:
+
+| Qualificatore | Eseguito su | Chiamabile da | Tipo di Ritorno |
+| :--- | :--- | :--- | :--- |
+| **`__host__`** *(default)* | Host (CPU) | Host | Qualsiasi tipo C/C++ |
+| **`__device__`** | Device (GPU) | Device | Qualsiasi tipo C/C++ |
+| **`__global__`** *(Kernel)* | Device (GPU) | Host | Solo ed esclusivamente `void` |
+| **`__host__ __device__`** | Host & Device | Host & Device | Qualsiasi tipo C/C++ |
 
