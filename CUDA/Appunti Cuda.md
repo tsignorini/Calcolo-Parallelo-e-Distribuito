@@ -404,6 +404,30 @@ Anteporre la parola chiave `__device__` alla definizione di una funzione indica 
 
 È importante ricordare che i qualificatori `__global__` e `__device__` non possono mai essere applicati contemporaneamente alla stessa funzione.
 
+Di seguito è riportato un classico esempio di utilizzo del qualificatore `__device__`. Creeremo una piccola funzione di supporto per calcolare il massimo tra due numeri in virgola mobile (`cuda_fmaxf`) e la richiameremo all'interno del nostro kernel principale [1].
+
+```cpp
+// 1. Funzione ausiliaria: eseguita SOLO sulla GPU e chiamata SOLO dalla GPU
+// A differenza di un kernel, restituisce regolarmente un valore (float)
+__device__ float cuda_fmaxf(float a, float b) {
+    return (a > b ? a : b); 
+}
+
+// 2. Kernel principale: eseguito sulla GPU ma chiamato dall'Host (CPU)
+__global__ void my_kernel(float *v, int n) {
+    // Ogni thread calcola il proprio indice globale
+    int i = threadIdx.x + blockIdx.x * blockDim.x;
+
+    // Controllo dei limiti dell'array
+    if (i < n) {
+        // Il kernel chiama la funzione __device__. 
+        // Grazie all'inlining, il compilatore sostituirà questa riga 
+        // espandendo direttamente il codice di cuda_fmaxf al suo interno.
+        v[i] = cuda_fmaxf(1.0f, v[i]);
+    }
+}
+```
+
 ### L'assenza di Stack e i Vantaggi dell'Inlining
 Nelle architetture CPU classiche, l'invocazione di una funzione ha un costo prestazionale (*overhead*): il sistema deve salvare lo stato di esecuzione, saltare all'indirizzo di memoria della funzione, allocare le variabili locali su uno *stack* (una speciale struttura a pila), eseguire i calcoli e saltare nuovamente indietro. 
 
