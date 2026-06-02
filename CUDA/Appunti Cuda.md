@@ -301,3 +301,66 @@ In questa situazione critica, si verificano i seguenti problemi prestazionali a 
 Di conseguenza, a causa dell'eccessiva allocazione di memoria per singolo thread, **la GPU rimarrà in idle (inattiva) per lunghi periodi, non sfruttando a pieno i suoi core computazionali e vanificando l'enorme potenza di calcolo parallelo per cui è stata progettata**.
 
 
+
+# L'Utilità dei Thread: Stencil 1D
+
+Fino a questo momento potremmo chiederci: perché complicarci la vita con i thread? Se la GPU può gestire migliaia di blocchi in modo automatico, non potremmo semplicemente lanciare tantissimi blocchi composti da un solo thread ciascuno? 
+
+Sebbene in alcuni scenari banali (come la semplice somma di due vettori) questo approccio possa funzionare, in molti problemi reali risulterebbe disastroso. A differenza dei blocchi (che sono completamente indipendenti e isolati), **i thread all'interno dello stesso blocco possiedono due meccanismi fondamentali: possono comunicare tra loro e possono sincronizzarsi**. 
+
+Per capire quanto questi due superpoteri rendano i thread superiori a un approccio "a blocchi singoli", analizziamo il classico algoritmo dello **Stencil 1D**.
+
+### Il Problema: Letture multiple e il collo di bottiglia
+Lo Stencil 1D è un'operazione in cui ogni elemento di un array di output viene calcolato come la somma (o una media) degli elementi dell'array di input compresi entro un certo `RADIUS` (raggio). Se il raggio è 3, ogni elemento in uscita richiederà la lettura di 7 elementi in ingresso (i 3 a sinistra, l'elemento stesso, e i 3 a destra).
+Più in generale, con un raggio $R$, **ogni singolo dato in input viene letto dalla memoria per ben $(2R+1)$ volte**.
+
+Se affrontassimo questo problema usando blocchi da 1 singolo thread, ogni thread dovrebbe leggere i suoi 7 elementi direttamente dalla lenta Memoria Globale. Poiché i thread di blocchi diversi non possono parlarsi, le letture si sovrapporrebbero in continuazione, intasando la banda passante della memoria globale e creando un enorme collo di bottiglia.
+
+### La Soluzione: Memoria Condivisa (Comunicazione)
+Raggruppando più thread all'interno dello stesso blocco, possiamo sfruttare la **Memoria Condivisa (Shared Memory)**. Si tratta di una memoria ultra-veloce integrata direttamente nel chip del multiprocessore, che funge da cache gestita manualmente dal programmatore. 
+
+Invece di far leggere a ogni thread gli stessi dati dalla memoria globale, possiamo far **cooperare i thread del blocco**:
+1. Ognuno dei thread (`blockDim.x` in totale) legge esattamente un solo elemento dalla memoria globale e lo salva nella memoria condivisa.
+2. I primi `RADIUS` thread del blocco si fanno carico di un piccolo lavoro extra: leggere anche i dati di bordo (il cosiddetto "alone" o *halo*) necessari per i calcoli ai margini del blocco.
+
+In questo modo, abbiamo trasferito un intero segmento di dati (più i bordi) dalla lenta memoria globale alla velocissima memoria condivisa con un numero minimo di transazioni.
+
+### Il Rischio: Data Race e la necessità di Sincronizzazione
+Questa cooperazione introduce però un problema critico di temporizzazione. Poiché i warp e i thread vengono eseguiti con tempistiche leggermente diverse, cosa succede se il thread numero 15 tenta di eseguire il calcolo matematico dello stencil *prima* che il thread 0 abbia finito di scaricare il proprio pezzo di "alone" nella memoria condivisa? 
+Si verifica un **Data Race** (condizione di corsa): il thread 15 leggerebbe un dato sporco o inesistente, portando a calcoli completamente errati.
+
+Qui entra in gioco il secondo superpotere dei thread: la funzione barriera **`__syncthreads()`**. Questa istruzione blocca l'esecuzione di ogni thread del blocco finché *tutti* gli altri thread non l'hanno raggiunta. 
+
+### Il Kernel Funzionante
+Ecco come i due concetti si uniscono in un codice efficiente ed elegante:
+
+```cpp
+__global__ void stencil_1d(int *in, int *out) {
+    // 1. Alloco la memoria condivisa (Dimensione blocco + i due aloni ai bordi)
+    __shared__ int temp[BLKDIM + 2 * RADIUS];
+    
+    int gindex = threadIdx.x + blockIdx.x * blockDim.x + RADIUS;
+    int lindex = threadIdx.x + RADIUS;
+    
+    // 2. I thread cooperano per copiare i dati dalla memoria globale a quella condivisa
+    temp[lindex] = in[gindex];
+    if (threadIdx.x < RADIUS) {
+        temp[lindex - RADIUS] = in[gindex - RADIUS]; // Halo sinistro
+        temp[lindex + blockDim.x] = in[gindex + blockDim.x]; // Halo destro
+    }
+    
+    // 3. SINCRONIZZAZIONE: Nessuno procede finché tutta la memoria condivisa non è pronta!
+    __syncthreads(); 
+    
+    // 4. Calcolo dello stencil usando SOLO la velocissima memoria condivisa
+    int result = 0;
+    for (int offset = -RADIUS ; offset <= RADIUS ; offset++) {
+        result += temp[lindex + offset]; 
+    }
+    
+    // 5. Scrittura del risultato
+    out[gindex] = result;
+}
+```
+
+In sintesi, **senza la possibilità di racchiudere i thread nello stesso blocco, non potremmo né dichiarare un'area di memoria visibile a tutti loro (`__shared__`), né potremmo sincronizzarli con `__syncthreads()` per assicurare un caricamento dati cooperativo**. Questo dimostra perché l'astrazione basata sui thread è assolutamente vitale per scrivere codice GPU ad alte prestazioni.
