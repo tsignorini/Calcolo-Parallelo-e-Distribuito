@@ -364,3 +364,30 @@ __global__ void stencil_1d(int *in, int *out) {
 ```
 
 In sintesi, **senza la possibilità di racchiudere i thread nello stesso blocco, non potremmo né dichiarare un'area di memoria visibile a tutti loro (`__shared__`), né potremmo sincronizzarli con `__syncthreads()` per assicurare un caricamento dati cooperativo**. Questo dimostra perché l'astrazione basata sui thread è assolutamente vitale per scrivere codice GPU ad alte prestazioni.
+
+# Misurare il Tempo di Esecuzione dei Kernel
+
+Quando si vuole valutare le prestazioni di un programma CUDA misurandone il *wall-clock time*, è fondamentale ricordare che **le invocazioni dei kernel sono asincrone**. Non appena la CPU esegue l'istruzione di lancio, riprende istantaneamente il controllo passando all'istruzione successiva, senza aspettare che la GPU abbia effettivamente terminato il calcolo.
+
+Se si posiziona un timer prima e subito dopo la chiamata al kernel, si finirebbe per misurare soltanto il tempo irrisorio impiegato dalla CPU per accodare il comando, e non il reale tempo di elaborazione della GPU.
+
+Per ottenere una misurazione corretta, è **obbligatorio inserire una barriera di sincronizzazione esplicita** chiamando il comando `cudaDeviceSynchronize()` subito prima di fermare il cronometro. In questo modo si forza la CPU ad attendere la fine di tutte le operazioni sul Device.
+
+Ecco lo schema corretto per prendere i tempi:
+
+```cpp
+#include "hpc.h" // o altre funzioni per il calcolo del tempo (es. omp_get_wtime)
+// ...
+double tstart, tend;
+
+tstart = hpc_gettime();  // 1. Avvia il cronometro
+
+mykernel<<<X, Y>>>();    // 2. Lancio asincrono del kernel
+
+cudaDeviceSynchronize(); // 3. FONDAMENTALE: la CPU aspetta che la GPU finisca
+
+tend = hpc_gettime();    // 4. Ferma il cronometro
+
+printf("Tempo trascorso: %f secondi\n", tend - tstart);
+```
+
