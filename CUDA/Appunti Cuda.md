@@ -697,3 +697,31 @@ __global__ void sum( int *a, int n, int *result ) {
 * **L'Algoritmo ad Albero:** Nel ciclo `while`, i thread sommano coppie di elementi distanti `bsize` posizioni, dimezzando iterativamente lo spazio di ricerca (`bsize = bsize / 2`). Ad ogni passo il numero di thread attivi si dimezza, portando progressivamente il risultato finale del blocco nella prima posizione dell'array condiviso (`temp`). Affinché questo approccio dividi-et-impera funzioni correttamente, la dimensione del blocco (`BLKDIM`) deve obbligatoriamente essere una **potenza di due** e la dimensione totale `n` deve essere un multiplo di `BLKDIM`.
 * **La necessità di `__syncthreads()`:** Oltre alla sincronizzazione iniziale per il caricamento dei dati, è cruciale chiamare `__syncthreads()` all'interno del ciclo *dopo* l'aggiornamento dell'array condiviso. Questo assicura che il passo di riduzione corrente sia stato completato da tutti i thread attivi prima di procedere alla successiva iterazione di dimezzamento, prevenendo condizioni di data races.
 * **Le Funzioni Atomiche (`atomicAdd`):** Un'istruzione come `atomicAdd` permette di eseguire in modo indissolubile (atomico) un'operazione di lettura, modifica e scrittura (read-update-write) su una locazione di memoria a 32 o 64 bit. Quando il thread `0` di ogni blocco finisce la propria somma locale, cerca di aggiornare la variabile globale `result`. Se decine di blocchi tentassero di scrivere simultaneamente tramite un'assegnazione classica (`*result += temp`), molti dati verrebbero persi. La funzione `atomicAdd` mette in coda le richieste in hardware, garantendo un accumulo serializzato e matematicamente corretto. Affinché produca il risultato esatto, la variabile `result` nella memoria globale deve essere inizializzata a zero prima di lanciare il kernel.
+
+
+# Tecniche di Ottimizzazione della Memoria in CUDA
+
+Nei programmi CUDA, la potenza di calcolo della GPU è talmente elevata che il vero collo di bottiglia è quasi sempre la velocità con cui i dati possono essere letti e scritti. Per questo motivo, ottimizzare i pattern di accesso alla memoria è fondamentale per non vanificare le prestazioni del codice parallelo.
+
+Le strategie principali si concentrano su due livelli della gerarchia: la memoria condivisa (on-chip) e la memoria globale (off-chip).
+
+### Ottimizzare la Memoria Condivisa: I Banchi di Memoria (Memory Banks)
+La memoria condivisa è estremamente veloce, ma per poter fornire dati a decine di thread simultaneamente è strutturata fisicamente in modo molto particolare. Essa è divisa in moduli di uguali dimensioni chiamati **banchi di memoria (memory banks)**.
+
+La distribuzione dei dati avviene in modo interlacciato (*interleaved*): le parole consecutive a 32-bit vengono assegnate a banchi consecutivi. Ad esempio, l'indirizzo 0 si trova nel banco 0, l'indirizzo 1 nel banco 1, l'indirizzo 2 nel banco 2, e così via (le schede più moderne possiedono 32 banchi indipendenti).
+
+Questa architettura è progettata per un motivo preciso: **i banchi di memoria possono essere letti in parallelo**. 
+Se i 32 thread di un *warp* (o *half-warp* in architetture meno recenti) necessitano di dati, ed ogni thread richiede un dato che risiede in un banco **differente**, l'hardware riesce a fondere la richiesta. Tutti i dati vengono così "pescati in un colpo solo", risolvendo la chiamata di memoria in una singola e velocissima transazione.
+
+Il problema, noto come **Bank Conflict (conflitto di banco)**, si verifica quando più thread dello stesso warp cercano di accedere contemporaneamente ad indirizzi di memoria diversi che cadono però nello **stesso banco**. Poiché un singolo banco non può fornire due dati diversi contemporaneamente, **la GPU è costretta a serializzare l'operazione, dividendo la richiesta in più chiamate separate** e abbattendo le prestazioni in proporzione al numero di conflitti.
+
+Per ottimizzare il codice, il programmatore deve quindi strutturare l'accesso agli array in memoria condivisa affinché i thread peschino i dati con un pattern che distribuisca le letture in modo uniforme su banchi differenti. Esiste tuttavia un'eccezione positiva: se tutti i thread del warp leggono lo *stesso identico indirizzo* (che risiede in un solo banco), il dato viene trasmesso a tutti in *broadcast* in un singolo ciclo, senza causare conflitti.
+
+### Ottimizzare la Memoria Globale: Coalescing e SoA
+Sebbene la memoria globale non usi il concetto di "banchi" accessibili dall'utente, segue un principio di ottimizzazione molto simile per minimizzare le chiamate: il **Memory Coalescing** (coalescenza).
+
+La GPU accede alla memoria globale esterna esclusivamente richiedendo blocchi (transazioni) da 32, 64 o 128 byte consecutivi. Per massimizzare la banda passante (il throughput), è necessario che le richieste dei vari thread del warp siano **coalescenti**:
+* **Accesso Ottimale:** Se i 32 thread consecutivi di un warp accedono ad indirizzi di memoria consecutivi e ben allineati (es. il thread 0 legge l'indice 0, il thread 1 l'indice 1, ecc.), l'hardware impacchetta le letture in un'unica grande transazione da 128 byte. L'efficienza del bus è del 100%.
+* **Accesso Sparso (Scattered):** Se i thread richiedono indirizzi saltuari o disallineati, i dati ricadranno in blocchi di memoria fisicamente lontani. La GPU sarà costretta ad avviare numerose chiamate/transazioni sulla lentissima memoria globale per recuperare frammenti sparsi, sprecando enormi quantità di banda per caricare byte che alla fine non verranno nemmeno usati.
+
+Un classico trucco per favorire il coalescing è il cambio di struttura dati. Se nella programmazione CPU è comune usare un "Array di Strutture" (*Array of Structures*, AoS) (ad esempio, un array di coordinate `[xyz, xyz, xyz]`), in CUDA questo pattern è distruttivo perché frammenta le letture. Per le GPU è quasi sempre preferibile convertire il dato in una "Struttura di Array" (*Structure of Arrays*, SoA) (ovvero `[xxx...], [yyy...], [zzz...]`), garantendo così che la lettura parallela di una determinata componente avvenga su indirizzi perfettamente contigui e coalescenti.
