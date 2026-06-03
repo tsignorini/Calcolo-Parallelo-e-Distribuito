@@ -577,3 +577,77 @@ int main() {
 ```
 L'utilizzo di queste funzioni è caldamente consigliato: individuare tempestivamente l'esatta riga di codice che ha causato un fallimento sulla GPU fa risparmiare ore di debugging.
 
+
+# Griglie e Blocchi a Più Dimensioni
+
+Finora abbiamo affrontato problemi lineari (come la somma di due vettori o lo stencil 1D), per i quali era sufficiente allineare i thread lungo una singola dimensione (l'asse X). Tuttavia, molti problemi reali nel calcolo ad alte prestazioni, come l'elaborazione di immagini o le simulazioni fisiche spaziali, hanno una natura intrinsecamente bidimensionale (2D) o tridimensionale (3D).
+
+Per facilitare la stesura del codice, offrendo un'astrazione che si mappa in modo naturale sul dominio geometrico del problema, CUDA permette di organizzare sia i **blocchi** (l'insieme dei thread) che le **griglie** (l'insieme dei blocchi) in 1, 2 o 3 dimensioni.
+
+### Il tipo di dato `dim3`
+Per definire configurazioni di esecuzione a più dimensioni, CUDA introduce un tipo di dato specifico chiamato **`dim3`** (una struttura contenente sempre i tre campi dimensionali `x`, `y` e `z`). 
+
+Quando si inizializza una variabile `dim3`, i campi per i quali non viene specificato un valore vengono automaticamente impostati a 1. Ecco alcuni esempi pratici di allocazione:
+
+```cpp
+dim3 blk1D(256);       // Blocco 1D: 256 x 1 x 1 thread (tot. 256 thread)
+dim3 blk2D(16, 16);    // Blocco 2D: 16 x 16 x 1 thread (tot. 256 thread)
+dim3 blk3D(8, 8, 8);   // Blocco 3D: 8 x 8 x 8 thread (tot. 512 thread)
+```
+
+Lo stesso concetto si applica alla griglia. Il lancio del kernel diventa così molto leggibile: al posto di inserire formule matematiche direttamente tra le tre parentesi angolari `<<<...>>>`, passeremo semplicemente le variabili `dim3` appena create:
+
+```cpp
+dim3 grid(16, 4);       // Griglia 2D composta da 16x4 blocchi
+dim3 block(8, 8, 8);    // Blocco 3D composto da 8x8x8 thread
+mio_kernel<<<grid, block>>>(...);
+```
+
+### Navigare nello spazio e l'Appiattimento degli Indici
+All'interno del kernel, il programmatore può accedere alle nuove coordinate spaziali utilizzando i suffissi `.y` e `.z` delle variabili integrate (es. `threadIdx.y`, `blockIdx.z`, ecc.).
+
+Tuttavia, bisogna ricordare che **la memoria RAM fisica della GPU è comunque un unico nastro lineare**. Quando thread disposti in 2D o 3D vogliono leggere o scrivere un dato, devono convertire (o "appiattire") le proprie coordinate per trovare un singolo indirizzo lineare. 
+A titolo di esempio, se abbiamo un blocco 2D di dimensioni `(Dx, Dy)`, l'ID del thread corrispondente alle coordinate `(x, y)` si calcolerà con la formula `x + y * Dx`. Analogamente, per un blocco 3D si userà la formula `x + y * Dx + z * Dx * Dy`.
+
+### Il caso d'uso classico: Moltiplicazione di Matrici
+L'esempio principe per dimostrare l'utilità di questa topologia è la **moltiplicazione tra matrici**. 
+
+Immaginiamo di dover moltiplicare due grandi matrici quadrate $N \times N$ per generare una matrice risultato. Affrontare questo algoritmo mappandolo su un singolo array di thread 1D richiederebbe calcoli di indici molto complessi e proni ad errore. Utilizzando blocchi e griglie 2D, invece, il problema si scompone in modo elegante:
+1. **Partizionamento:** Si divide la gigantesca matrice risultato in sottomatrici quadrate più piccole (dette *tiles* o blocchi).
+2. **Assegnazione:** Si assegna il calcolo di ogni sottomatrice a un intero blocco di thread (anch'esso 2D).
+3. **Esecuzione del Thread:** Il singolo thread all'interno del blocco si occuperà di calcolare **esattamente un elemento della matrice risultato**, leggendo la riga corrispondente dalla prima matrice e la colonna corrispondente dalla seconda.
+
+In questo modo, la struttura del software rispecchia perfettamente la geometria del problema matematico: il programmatore ragiona in modo più intuitivo e l'hardware scala le operazioni assegnando blocchi 2D indipendenti ai vari multiprocessori disponibili.
+
+### Ottimizzazione del Prodotto tra Matrici: Tiling e Limiti Hardware
+
+Quando si implementa la moltiplicazione tra due matrici $A$ e $B$ per ottenere una matrice $C$, l'approccio più banale consiste nell'assegnare a ogni thread il calcolo di un singolo elemento di $C$. Per farlo, il thread deve scorrere un'intera riga di $A$ e un'intera colonna di $B$, leggendo i dati direttamente dalla lenta memoria globale.
+
+Per ottimizzare drasticamente le prestazioni, è necessario sfruttare la **memoria condivisa (shared memory)**, che è incredibilmente più veloce, facendo collaborare i thread dello stesso blocco. Tuttavia, in questo passaggio sorge un problema architetturale critico legato alle dimensioni.
+
+#### Il problema della dipendenza da N
+Si potrebbe essere tentati di far caricare a un blocco di thread intere righe e intere colonne nella memoria condivisa (o di mantenerle nei registri privati) per poi eseguire i calcoli. Tuttavia, se facessimo così, la quantità di memoria veloce richiesta dipenderebbe direttamente da $N$, ovvero la dimensione totale (numero di entrate) della matrice. 
+
+Se ipotizziamo un blocco di dimensione `BLKDIM`, caricare intere strisce di matrice richiederebbe uno spazio proporzionale a $(2 \times \text{BLKDIM} \times N)$. All'aumentare di $N$, **questa richiesta saturerebbe istantaneamente la capacità limitata della memoria condivisa e dei registri** del multiprocessore (che ammonta a soli 16-48 KB per SM). 
+
+Come abbiamo visto, quando l'allocazione richiesta eccede i limiti fisici dell'hardware, si verifica il fenomeno del *register spilling* e il sistema è costretto a ripiegare sull'uso della lentissima memoria locale o globale off-chip. Questo collo di bottiglia causerebbe un crollo verticale delle prestazioni.
+
+#### La Soluzione: Suddivisione in Blocchi (Tiling)
+Per evitare la saturazione delle memorie veloci, il calcolo viene riorganizzato spezzando le righe e le colonne in sottomatrici quadrate più piccole, chiamate **tile** (o blocchi), tipicamente di dimensione `BLKDIM x BLKDIM`. 
+
+Invece di caricare l'intera riga, i thread del blocco procedono a tappe:
+1. Caricano in parallelo dalla memoria globale alla memoria condivisa solo un piccolo *tile* della matrice $A$ e un piccolo *tile* della matrice $B$.
+2. Sincronizzano l'esecuzione con `__syncthreads()` per assicurarsi che il caricamento sia completo.
+3. Moltiplicano questi due *tile* sfruttando la massima velocità della memoria on-chip e accumulano i risultati parziali.
+4. Sincronizzano nuovamente ed estraggono il *tile* successivo spostandosi lungo la riga di $A$ e la colonna di $B$.
+
+Grazie a questa tecnica, lo spazio di memoria condivisa richiesto diventa $(2 \times \text{BLKDIM} \times \text{BLKDIM})$, una **quantità fissa e indipendente da $N$**, che entra perfettamente nei limiti fisici della GPU senza mai degradare le prestazioni. Questo fa crollare il numero di accessi alla lenta memoria globale, risparmiando un'enorme quantità di banda passante.
+
+---
+
+#### Il Calcolo Parallelo e l'Intelligenza Artificiale
+
+A margine di questo discorso, vale la pena fare un piccolo ma fondamentale accenno all'**Intelligenza Artificiale** (in particolare al *Deep Learning*), un settore che negli ultimi anni ha guidato in modo massiccio l'adozione della piattaforma CUDA. 
+
+Sotto la complessa architettura delle reti neurali artificiali, le fasi di addestramento (training) e di inferenza si traducono essenzialmente in **miliardi di operazioni di prodotto matrice-vettore e matrice-matrice**. È esattamente per questo motivo che le moderne IA necessitano di schede video estremamente potenti per funzionare: l'hardware delle GPU, progettato per gestire migliaia di thread simultanei, unito all'uso di memorie condivise e tecniche di *tiling* come quelle appena descritte, permette di risolvere queste immense operazioni di algebra lineare a velocità semplicemente irraggiungibili dalle tradizionali architetture CPU.
+
