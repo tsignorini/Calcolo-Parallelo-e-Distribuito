@@ -651,3 +651,49 @@ A margine di questo discorso, vale la pena fare un piccolo ma fondamentale accen
 
 Sotto la complessa architettura delle reti neurali artificiali, le fasi di addestramento (training) e di inferenza si traducono essenzialmente in **miliardi di operazioni di prodotto matrice-vettore e matrice-matrice**. È esattamente per questo motivo che le moderne IA necessitano di schede video estremamente potenti per funzionare: l'hardware delle GPU, progettato per gestire migliaia di thread simultanei, unito all'uso di memorie condivise e tecniche di *tiling* come quelle appena descritte, permette di risolvere queste immense operazioni di algebra lineare a velocità semplicemente irraggiungibili dalle tradizionali architetture CPU.
 
+
+# Il Pattern di Riduzione (Reduction) in CUDA
+
+Un'operazione di **riduzione** consiste nell'applicare un operatore binario associativo (come la somma, il prodotto, il minimo o il massimo) agli elementi di un array per produrre un singolo risultato scalare. Mentre un approccio puramente sequenziale richiede un tempo lineare $O(n)$, un algoritmo parallelo può completare la riduzione in $O(\log_2 n)$ passi, utilizzando un approccio gerarchico ad albero.
+
+### La Strategia di Riduzione sulla GPU
+Poiché i thread appartenenti a blocchi diversi non possono sincronizzarsi direttamente tra loro durante l'esecuzione di un kernel, il calcolo della riduzione in CUDA viene tipicamente suddiviso in due fasi:
+1. **Scomposizione del problema (Riduzione Parziale):** Il lavoro viene diviso tra i vari thread block. Ogni blocco carica la propria porzione di dati nella memoria condivisa e calcola una somma (o altra operazione) parziale in parallelo. 
+2. **Combinazione Finale:** Una volta che i blocchi hanno prodotto i loro risultati parziali, è necessario sommarli tra loro per ottenere il risultato globale. Questo passaggio finale può essere demandato alla CPU (Host), oppure può essere risolto direttamente sulla GPU utilizzando le **operazioni atomiche**.
+
+### Esempio Pratico: Somma con Operazioni Atomiche
+Ecco l'implementazione del kernel per la riduzione (in questo caso una somma) che sfrutta la memoria condivisa per la riduzione locale al blocco e un'operazione atomica per l'accumulo globale:
+
+```cpp
+__global__ void sum( int *a, int n, int *result ) {
+    // Allocazione della memoria condivisa per il blocco
+    __shared__ int temp[BLKDIM];
+    
+    int lindex = threadIdx.x;
+    int gindex = threadIdx.x + blockIdx.x * blockDim.x;
+    int bsize = blockDim.x / 2;
+    
+    // 1. Caricamento cooperativo dei dati dalla memoria globale a quella condivisa
+    temp[lindex] = a[gindex];
+    __syncthreads(); // Attesa che tutti i thread abbiano caricato il loro dato
+    
+    // 2. Algoritmo di riduzione ad albero (passi logaritmici)
+    while ( bsize > 0 ) {
+        if ( lindex < bsize ) {
+            temp[lindex] += temp[lindex + bsize];
+        }
+        bsize = bsize / 2;
+        __syncthreads(); // Sincronizzazione fondamentale ad ogni livello dell'albero
+    }
+    
+    // 3. Accumulo del risultato parziale nel risultato globale in modo sicuro
+    if ( 0 == lindex ) {
+        atomicAdd(result, temp);
+    }
+}
+```
+
+### Analisi dei Concetti Chiave:
+* **L'Algoritmo ad Albero:** Nel ciclo `while`, i thread sommano coppie di elementi distanti `bsize` posizioni, dimezzando iterativamente lo spazio di ricerca (`bsize = bsize / 2`). Ad ogni passo il numero di thread attivi si dimezza, portando progressivamente il risultato finale del blocco nella prima posizione dell'array condiviso (`temp`). Affinché questo approccio dividi-et-impera funzioni correttamente, la dimensione del blocco (`BLKDIM`) deve obbligatoriamente essere una **potenza di due** e la dimensione totale `n` deve essere un multiplo di `BLKDIM`.
+* **La necessità di `__syncthreads()`:** Oltre alla sincronizzazione iniziale per il caricamento dei dati, è cruciale chiamare `__syncthreads()` all'interno del ciclo *dopo* l'aggiornamento dell'array condiviso. Questo assicura che il passo di riduzione corrente sia stato completato da tutti i thread attivi prima di procedere alla successiva iterazione di dimezzamento, prevenendo condizioni di data races.
+* **Le Funzioni Atomiche (`atomicAdd`):** Un'istruzione come `atomicAdd` permette di eseguire in modo indissolubile (atomico) un'operazione di lettura, modifica e scrittura (read-update-write) su una locazione di memoria a 32 o 64 bit. Quando il thread `0` di ogni blocco finisce la propria somma locale, cerca di aggiornare la variabile globale `result`. Se decine di blocchi tentassero di scrivere simultaneamente tramite un'assegnazione classica (`*result += temp`), molti dati verrebbero persi. La funzione `atomicAdd` mette in coda le richieste in hardware, garantendo un accumulo serializzato e matematicamente corretto. Affinché produca il risultato esatto, la variabile `result` nella memoria globale deve essere inizializzata a zero prima di lanciare il kernel.
