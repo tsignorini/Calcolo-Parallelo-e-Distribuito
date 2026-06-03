@@ -699,29 +699,41 @@ __global__ void sum( int *a, int n, int *result ) {
 * **Le Funzioni Atomiche (`atomicAdd`):** Un'istruzione come `atomicAdd` permette di eseguire in modo indissolubile (atomico) un'operazione di lettura, modifica e scrittura (read-update-write) su una locazione di memoria a 32 o 64 bit. Quando il thread `0` di ogni blocco finisce la propria somma locale, cerca di aggiornare la variabile globale `result`. Se decine di blocchi tentassero di scrivere simultaneamente tramite un'assegnazione classica (`*result += temp`), molti dati verrebbero persi. La funzione `atomicAdd` mette in coda le richieste in hardware, garantendo un accumulo serializzato e matematicamente corretto. Affinché produca il risultato esatto, la variabile `result` nella memoria globale deve essere inizializzata a zero prima di lanciare il kernel.
 
 
-# Tecniche di Ottimizzazione della Memoria in CUDA
 
-Nei programmi CUDA, la potenza di calcolo della GPU è talmente elevata che il vero collo di bottiglia è quasi sempre la velocità con cui i dati possono essere letti e scritti. Per questo motivo, ottimizzare i pattern di accesso alla memoria è fondamentale per non vanificare le prestazioni del codice parallelo.
+# Il Caricamento dei Dati dalla Memoria Globale (Caching Load)
 
-Le strategie principali si concentrano su due livelli della gerarchia: la memoria condivisa (on-chip) e la memoria globale (off-chip).
+Come abbiamo visto, la GPU non legge mai un singolo byte alla volta dalla memoria globale (DRAM), ma preleva interi blocchi di memoria contigui (le *cache-line*) da 32 o 128 byte per volta attraverso il bus. 
 
-### Ottimizzare la Memoria Condivisa: I Banchi di Memoria (Memory Banks)
-La memoria condivisa è estremamente veloce, ma per poter fornire dati a decine di thread simultaneamente è strutturata fisicamente in modo molto particolare. Essa è divisa in moduli di uguali dimensioni chiamati **banchi di memoria (memory banks)**.
+Quando i 32 thread di un *warp* eseguono un'istruzione di lettura, l'hardware cerca di raggruppare tutte le loro richieste nel minor numero possibile di blocchi. Questo meccanismo prende il nome di **Memory Coalescing** (coalescenza della memoria). 
 
-La distribuzione dei dati avviene in modo interlacciato (*interleaved*): le parole consecutive a 32-bit vengono assegnate a banchi consecutivi. Ad esempio, l'indirizzo 0 si trova nel banco 0, l'indirizzo 1 nel banco 1, l'indirizzo 2 nel banco 2, e così via (le schede più moderne possiedono 32 banchi indipendenti).
+A seconda di come gli indirizzi richiesti dai thread si dispongono nello spazio, si possono verificare quattro scenari principali di caricamento (definiti *Caching Load*):
 
-Questa architettura è progettata per un motivo preciso: **i banchi di memoria possono essere letti in parallelo**. 
-Se i 32 thread di un *warp* (o *half-warp* in architetture meno recenti) necessitano di dati, ed ogni thread richiede un dato che risiede in un banco **differente**, l'hardware riesce a fondere la richiesta. Tutti i dati vengono così "pescati in un colpo solo", risolvendo la chiamata di memoria in una singola e velocissima transazione.
+### 1. Caricamento Allineato (Consecutivo o Permutato)
+È lo scenario ideale. Se i 32 thread richiedono 32 parole da 4 byte che sono perfettamente contigue in memoria e l'indirizzo di partenza è allineato ai multipli di 128 byte, tutti i dati cadono all'interno di un'unica *cache-line*.
+*   **Risultato:** L'hardware esegue **1 sola transazione** sul bus. 
+*   **Efficienza:** Il bus viene sfruttato al **100%**, poiché tutti i 128 byte trasferiti vengono effettivamente utilizzati dai thread. (Nota: questo vale anche se i thread leggono i dati in ordine permutato, purché rimangano tutti dentro la stessa *cache-line*).
 
-Il problema, noto come **Bank Conflict (conflitto di banco)**, si verifica quando più thread dello stesso warp cercano di accedere contemporaneamente ad indirizzi di memoria diversi che cadono però nello **stesso banco**. Poiché un singolo banco non può fornire due dati diversi contemporaneamente, **la GPU è costretta a serializzare l'operazione, dividendo la richiesta in più chiamate separate** e abbattendo le prestazioni in proporzione al numero di conflitti.
+### 2. Caricamento Disallineato
+I thread richiedono dati consecutivi, ma l'indirizzo di partenza è sfalsato rispetto all'allineamento ottimale. A causa di questo slittamento, i 128 byte totali richiesti finiranno a cavallo tra **due *cache-line* fisiche adiacenti**.
+*   **Risultato:** La GPU è costretta a eseguire **2 transazioni** distinte per recuperare entrambe le linee di cache, muovendo un totale di 256 byte dal bus.
+*   **Efficienza:** Il bus viene sfruttato al **50%**, poiché metà dei dati trasferiti non serve a nessun thread in quel momento e viene scartata.
 
-Per ottimizzare il codice, il programmatore deve quindi strutturare l'accesso agli array in memoria condivisa affinché i thread peschino i dati con un pattern che distribuisca le letture in modo uniforme su banchi differenti. Esiste tuttavia un'eccezione positiva: se tutti i thread del warp leggono lo *stesso identico indirizzo* (che risiede in un solo banco), il dato viene trasmesso a tutti in *broadcast* in un singolo ciclo, senza causare conflitti.
+### 3. Richiesta dello Stesso Dato (Broadcast in Memoria Globale)
+Cosa succede se tutti i 32 thread del warp puntano all'indirizzo della **stessa identica parola da 4 byte**? In questo caso, l'indirizzo richiesto è uno solo, quindi ricade per forza all'interno di una singola *cache-line*.
+*   **Risultato:** Viene eseguita **1 sola transazione** sul bus.
+*   **Efficienza:** Pur essendo veloce (perché fa una sola pescata), l'efficienza matematica del bus crolla al **3.125%**. Questo perché la GPU è comunque obbligata a muovere un intero blocco da 128 byte per estrarne solo i 4 byte richiesti in blocco da tutto il warp.
 
-### Ottimizzare la Memoria Globale: Coalescing e SoA
-Sebbene la memoria globale non usi il concetto di "banchi" accessibili dall'utente, segue un principio di ottimizzazione molto simile per minimizzare le chiamate: il **Memory Coalescing** (coalescenza).
+### 4. Caricamento Sparso (Scattered)
+È lo scenario peggiore in assoluto. Se i thread richiedono indirizzi casuali o distanti tra loro, i dati necessari ricadranno in $N$ *cache-line* totalmente diverse.
+*   **Risultato:** L'hardware deve avviare **$N$ transazioni separate**, generando un enorme traffico sul bus e aumentando drasticamente i tempi di attesa.
 
-La GPU accede alla memoria globale esterna esclusivamente richiedendo blocchi (transazioni) da 32, 64 o 128 byte consecutivi. Per massimizzare la banda passante (il throughput), è necessario che le richieste dei vari thread del warp siano **coalescenti**:
-* **Accesso Ottimale:** Se i 32 thread consecutivi di un warp accedono ad indirizzi di memoria consecutivi e ben allineati (es. il thread 0 legge l'indice 0, il thread 1 l'indice 1, ecc.), l'hardware impacchetta le letture in un'unica grande transazione da 128 byte. L'efficienza del bus è del 100%.
-* **Accesso Sparso (Scattered):** Se i thread richiedono indirizzi saltuari o disallineati, i dati ricadranno in blocchi di memoria fisicamente lontani. La GPU sarà costretta ad avviare numerose chiamate/transazioni sulla lentissima memoria globale per recuperare frammenti sparsi, sprecando enormi quantità di banda per caricare byte che alla fine non verranno nemmeno usati.
+---
 
-Un classico trucco per favorire il coalescing è il cambio di struttura dati. Se nella programmazione CPU è comune usare un "Array di Strutture" (*Array of Structures*, AoS) (ad esempio, un array di coordinate `[xyz, xyz, xyz]`), in CUDA questo pattern è distruttivo perché frammenta le letture. Per le GPU è quasi sempre preferibile convertire il dato in una "Struttura di Array" (*Structure of Arrays*, SoA) (ovvero `[xxx...], [yyy...], [zzz...]`), garantendo così che la lettura parallela di una determinata componente avvenga su indirizzi perfettamente contigui e coalescenti.
+### La Regola d'Oro: Structure of Arrays (SoA)
+
+Per garantire che il caricamento sia sempre coalescente (Scenario 1), il programmatore deve strutturare le variabili in modo intelligente. 
+
+Un tipico errore di derivazione CPU è l'uso degli **Array di Strutture (AoS)**. Se dichiariamo una struttura punto 3D `struct { float x; float y; float z; }` e ne facciamo un array, i dati in memoria saranno disposti come `x0, y0, z0, x1, y1, z1, ...`. Quando il warp cerca di leggere in parallelo solo le coordinate `x`, i thread pescheranno indirizzi distanti 12 byte l'uno dall'altro, generando un **caricamento sparso (scattered)** ad altissima inefficienza.
+
+La soluzione in CUDA è invertire il paradigma utilizzando le **Strutture di Array (SoA)**. Dichiarando `struct { float *x; float *y; float *z; }`, tutte le coordinate `x` del sistema saranno perfettamente contigue in memoria (`x0, x1, x2, ...`). In questo modo, quando il warp richiederà le componenti `x`, le letture saranno consecutive e allineate, permettendo alla GPU di caricare i dati con **una singola, efficientissima transazione** da 128 byte. Tuttavia, questo tipo di definizione rende poi molto complicato manipolare l'oggetto a livello logico (ad esempio aggiungere, rimuovere o spostare un singolo punto), poiché costringe il programmatore a operare su array separati in modo sincronizzato. In sostanza, in favore delle massime prestazioni e di un miglior posizionamento in memoria per l'hardware, la `struct` perde le utilissime caratteristiche di incapsulamento, astrazione e comodità tipiche del software tradizionale.
+
