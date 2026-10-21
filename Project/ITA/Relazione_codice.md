@@ -114,8 +114,8 @@ Fino a $32$ thread lo speedup risulta in accordo con quello ideale, con efficien
 Nel passaggio da $32$ a $64$ thread l'efficienza cala drasticamente (da $0.81$ a $0.58$). Questo calo è compatibile con la saturazione dei core fisici ($40$ sulla DGX) e con una progressiva contesa sulla cache L3 condivisa: ogni accesso di `is_inside` agli array dei vertici consuma banda sull'interconnessione verso la L3. All'aumentare dei thread attivi, il volume aggregato di queste richieste può saturare tale banda pur senza mai coinvolgere la RAM, come misurato attraverso cachegrind. Di seguito i grafici di speedup ed efficienza.
 
 <p align="center">
-  <img src="immagini/Speedup.png" alt="Speedup OpenMP" width="48%">
-  <img src="immagini/Strong_scaling_efficiency.png" alt="Efficienza strong scaling OpenMP" width="48%">
+  <img src="Immagini/Speedup.png" alt="Speedup OpenMP" width="48%">
+  <img src="Immagini/Strong_scaling_efficiency.png" alt="Efficienza strong scaling OpenMP" width="48%">
 </p>
 
 **Figura 1.** Speedup (a sinistra) ed efficienza (a destra) del test di strong scaling in funzione del numero di thread.
@@ -123,7 +123,7 @@ Nel passaggio da $32$ a $64$ thread l'efficienza cala drasticamente (da $0.81$ a
 Dalla Figura 2 si vede che il wall-clock time decresce significativamente fino a $32$ thread, passando infatti da $2240.25$ secondi a $86.47$ secondi, dopodiché la riduzione temporale è sempre più blanda. Questo suggerisce che, oltre una certa soglia, aggiungere core non comporta reali benefici: l'overhead e i colli di bottiglia iniziano a dominare, e inizia a dominare anche la parte seriale del codice.
 
 <p align="center">
-  <img src="immagini/Wall_clock_time.png" alt="Wall-clock time OpenMP" width="50%">
+  <img src="Immagini/Wall_clock_time.png" alt="Wall-clock time OpenMP" width="50%">
 </p>
 
 **Figura 2.** Tempo di esecuzione (wall-clock time, in secondi) in funzione del numero di core $p$.
@@ -163,7 +163,7 @@ Facendo le medie dei tempi presenti in Tabella 4 si ottengono i seguenti risulta
 Il weak scaling mostra un'efficienza molto buona, intorno a 0.95-0.96, fino a 16 thread: il tempo di esecuzione rimane quasi costante nonostante il carico di lavoro cresca proporzionalmente al numero di thread. Oltre questa soglia l'efficienza decresce, passando a 0.83 con 32 thread e a 0.49 con 80. Una possibile causa di tale calo può essere legata alle caratteristiche della macchina utilizzata, che dispone di 80 core logici, che corrispondono a 40 core fisici con SMT (*simultaneous multithreading*): oltre i 40 thread due thread condividono le stesse unità di esecuzione e la stessa cache, quindi le risorse hardware disponibili non raddoppiano più insieme al carico.
 
 <p align="center">
-  <img src="immagini/Weak_scaling_efficiency.png" alt="Efficienza weak scaling OpenMP" width="60%">
+  <img src="Immagini/Weak_scaling_efficiency.png" alt="Efficienza weak scaling OpenMP" width="60%">
 </p>
 
 **Figura 3.** Efficienza del weak scaling in funzione del numero di core $p$.
@@ -249,8 +249,8 @@ Dai dati presenti in Tabella 6 si ricavano i tempi medi di esecuzione, dai quali
 Il tempo medio di esecuzione passa da circa $1355.75$ s con un singolo processo a $44.85$ s con $80$ processi, con uno speedup massimo di $30.23$. Tuttavia, lo scaling non risulta uniforme. Dalla Tabella 7 si nota che fino a $32$ processi l'efficienza è superiore all'$80\%$: il programma è ben parallelizzato e il guadagno in termini di tempo di esecuzione è significativo. Da $40$ processi in poi l'efficienza peggiora drasticamente. Ciò coincide con la saturazione dei core fisici disponibili sulla DGX ($40$ core, $80$ core logici): con $64$ e $80$ processi più processi condividono lo stesso core, e in tutti questi regimi diventano dominanti gli overhead (comunicazione, sincronizzazione, accessi alla memoria), per cui il tempo di esecuzione non scala più proporzionalmente. Inoltre, da $32$ processi in poi aumenta la variabilità dei tempi tra le diverse run, come si nota nella Tabella 6. Di seguito i grafici ricavati dalla Tabella 7.
 
 <p align="center">
-  <img src="immagini/SpeedUp_MPI.png" alt="Speedup MPI" width="48%">
-  <img src="immagini/Strong_Scaling_Efficiency_MPI.png" alt="Efficienza strong scaling MPI" width="48%">
+  <img src="Immagini/SpeedUp_MPI.png" alt="Speedup MPI" width="48%">
+  <img src="Immagini/Strong_Scaling_Efficiency_MPI.png" alt="Efficienza strong scaling MPI" width="48%">
 </p>
 
 **Figura 4.** Speedup (a sinistra) ed efficienza (a destra) del test di strong scaling in funzione del numero di processi.
@@ -258,7 +258,7 @@ Il tempo medio di esecuzione passa da circa $1355.75$ s con un singolo processo 
 Dalla seguente immagine si vede lo stabilizzarsi del wall-clock time a partire da $32$ processi attivi.
 
 <p align="center">
-  <img src="immagini/Wall_Clock_Mpi.png" alt="Wall-clock time MPI" width="50%">
+  <img src="Immagini/Wall_Clock_Mpi.png" alt="Wall-clock time MPI" width="50%">
 </p>
 
 **Figura 5.** Tempo di esecuzione (wall-clock time, in secondi) in funzione del numero di core $p$.
@@ -300,7 +300,7 @@ Facendo le medie dei tempi presenti in Tabella 8 si ottengono i seguenti risulta
 Da cui si ricava il grafico dell'efficienza di weak scaling in Figura 6.
 
 <p align="center">
-  <img src="immagini/Weak_efficiency_MPI.png" alt="Efficienza weak scaling MPI" width="60%">
+  <img src="Immagini/Weak_efficiency_MPI.png" alt="Efficienza weak scaling MPI" width="60%">
 </p>
 
 **Figura 6.** Efficienza del weak scaling in funzione del numero di processi $p$.
